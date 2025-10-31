@@ -1,0 +1,79 @@
+# Randy Test Configuration
+# Optimized configuration for testing NeuroMod with Randy duplicant
+
+# Neuro SDK Connection Settings (Local Testing)
+neuro:
+  endpoint_url: "ws://localhost:8080/ws"
+  connection_timeout: 30
+  response_timeout: 5  # Faster response for testing
+  max_retry_attempts: 5  # More retries for unstable test connections
+  retry_delay: 2  # Faster retry for testing
+  auto_reconnect: true
+
+# Randy Duplicant Settings
+duplicant:
+  default_name: "Randy"  # Primary test duplicant
+  allow_rename: true
+  fallback_behavior: "idle"  # Safe fallback for testing
+  bio_monitoring_enabled: true
+  bio_update_frequency: 2  # More frequent updates for testing
+
+# Game Integration Settings (Test Mode)
+game:
+  schedule_control_enabled: true
+  realtime_decisions: true
+  command_priority: "high"
+  debug_mode: true  # Enable verbose logging for testing
+
+# Enhanced Test Settings
+test:
+  # Enable test mode features
+  enabled: true
+  
+  # Auto-find Randy duplicant on game start
+  auto_find_randy: true
+  
+  # Enable test commands
+  enable_test_commands: true
+  
+  # Verbose logging for debugging
+  verbose_logging: true
+  
+  # Test scenarios to run
+  test_scenarios:
+    - "basic_movement"
+    - "schedule_control"
+    - "bio_monitoring"
+    - "action_handling"
+
+# Timeout Management (Optimized for Testing)
+timeout:
+  global_timeout: 15  # Shorter timeout for faster test cycles
+  decision_timeout: 3  # Quick decisions for testing
+  action_timeout: 8   # Reasonable action timeout
+  max_concurrent_operations: 10
+  escalation_enabled: true
+  escalation_threshold: 3
+
+# Development/Debug Settings
+debug:
+  enable_console_logging: true
+  log_websocket_messages: true
+  log_action_details: true
+  log_bio_data_updates: true
+  log_schedule_changes: true
+  show_performance_metrics: true
+
+# Chat Integration (For Test Commands)
+chat:
+  enabled: true
+  command_prefix: "!randy"  # Special prefix for Randy testing
+  allow_public_commands: false  # Security for testing
+  moderator_only: true
+
+# Performance Settings (Optimized for Testing)
+performance:
+  update_frequency: 60  # 60 FPS for smooth testing
+  bio_data_cache_duration: 5
+  action_queue_size: 50
+  enable_performance_monitoring: true

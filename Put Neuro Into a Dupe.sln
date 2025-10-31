@@ -1,0 +1,31 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36429.23 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeurosControl", "NeuroMod\NeurosControl.csproj", "{36420EE4-E4F6-4D2C-A8FC-91FDA99C0FD9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeuroMod.Tests", "NeuroMod.Tests\NeuroMod.Tests.csproj", "{B8F5E2A4-3C9D-4F8B-9E2A-1D7C8A5F6B3E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{36420EE4-E4F6-4D2C-A8FC-91FDA99C0FD9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{36420EE4-E4F6-4D2C-A8FC-91FDA99C0FD9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{36420EE4-E4F6-4D2C-A8FC-91FDA99C0FD9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{36420EE4-E4F6-4D2C-A8FC-91FDA99C0FD9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B8F5E2A4-3C9D-4F8B-9E2A-1D7C8A5F6B3E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B8F5E2A4-3C9D-4F8B-9E2A-1D7C8A5F6B3E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B8F5E2A4-3C9D-4F8B-9E2A-1D7C8A5F6B3E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B8F5E2A4-3C9D-4F8B-9E2A-1D7C8A5F6B3E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {9FB23986-B118-4E9C-9F3A-A45ADAACB73D}
+	EndGlobalSection
+EndGlobal
