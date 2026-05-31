@@ -9,14 +9,13 @@ namespace NeuroMod.Tests.Configuration;
 /// Comprehensive tests for ConfigManager class
 /// Tests configuration loading, validation, fallbacks, and error handling
 /// </summary>
-[TestFixture]
 public class ConfigManagerTests
 {
     private ConfigManager _configManager = null!;
     private string _testConfigPath = null!;
 
     [SetUp]
-    public void Setup()
+    public void SetUp()
     {
         // Create a test directory for config files
         _testConfigPath = Path.Combine(Path.GetTempPath(), "NeuroModTests", Guid.NewGuid().ToString());
@@ -28,7 +27,7 @@ public class ConfigManagerTests
     }
 
     [TearDown]
-    public void Cleanup()
+    public void TearDown()
     {
         // Clean up test files
         if (Directory.Exists(_testConfigPath))

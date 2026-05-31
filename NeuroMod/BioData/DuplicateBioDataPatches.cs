@@ -5,8 +5,10 @@ using System.Collections.Generic;
 namespace NeuroMod;
 
 /// <summary>
-/// Main class for accessing duplicant bio data through Harmony patches
+/// Maintains the live duplicate bio-data cache by reacting to Harmony patch callbacks.
 /// </summary>
+/// <pre>Harmony has patched the relevant game callbacks before the public API is used.</pre>
+/// <post>Cached bio data is refreshed lazily and update notifications are emitted for successful refreshes.</post>
 [HarmonyPatch]
 public static class DuplicateBioDataPatches
 {
@@ -15,8 +17,12 @@ public static class DuplicateBioDataPatches
         [];
 
     /// <summary>
-    /// Patch Health component to intercept health changes
+    /// Refreshes cached bio data after a duplicate health change callback.
     /// </summary>
+    /// <param name="__instance">The health component whose owning duplicate may need a refreshed snapshot.</param>
+    /// <param name="delta">The health delta reported by the game callback.</param>
+    /// <pre><paramref name="__instance"/> belongs to a live duplicate when a refresh is expected.</pre>
+    /// <post>If the owning duplicate can be resolved and its required components are initialized, the cached snapshot has been refreshed.</post>
     [HarmonyPatch(typeof(Health), "OnHealthChanged")]
     [HarmonyPostfix]
     public static void Health_OnHealthChanged_Postfix(Health __instance, float delta)
@@ -29,8 +35,12 @@ public static class DuplicateBioDataPatches
     }
 
     /// <summary>
-    /// Patch AmountInstance to intercept amount changes (calories, stamina, etc.)
+    /// Refreshes cached bio data after a tracked amount value changes.
     /// </summary>
+    /// <param name="__instance">The amount instance whose owning duplicate may need a refreshed snapshot.</param>
+    /// <param name="value">The new amount value reported by the game callback.</param>
+    /// <pre><paramref name="__instance"/> belongs to a live duplicate when a refresh is expected.</pre>
+    /// <post>If the owning duplicate can be resolved and its required components are initialized, the cached snapshot has been refreshed.</post>
     [HarmonyPatch(typeof(AmountInstance), "SetValue")]
     [HarmonyPostfix]
     public static void AmountInstance_SetValue_Postfix(AmountInstance __instance, float value)
@@ -46,8 +56,13 @@ public static class DuplicateBioDataPatches
     }
 
     /// <summary>
-    /// Patch Effects to monitor status effect changes
+    /// Refreshes cached bio data after a status effect is added to a duplicate.
     /// </summary>
+    /// <param name="__instance">The effects component whose owning duplicate may need a refreshed snapshot.</param>
+    /// <param name="newEffect">The effect that has been applied.</param>
+    /// <param name="should_save">Whether the effect should be persisted by the game.</param>
+    /// <pre><paramref name="__instance"/> belongs to a live duplicate when a refresh is expected.</pre>
+    /// <post>If the owning duplicate can be resolved and its required components are initialized, the cached snapshot has been refreshed.</post>
     [HarmonyPatch(typeof(Effects), "Add", [typeof(Effect), typeof(bool)])]
     [HarmonyPostfix]
     public static void Effects_Add_Postfix(Effects __instance, Effect newEffect, bool should_save)
@@ -61,8 +76,11 @@ public static class DuplicateBioDataPatches
     }
 
     /// <summary>
-    /// Update bio data for a specific duplicate
+    /// Recomputes cached bio data for a specific duplicate when its components are ready.
     /// </summary>
+    /// <param name="minionIdentity">The duplicate whose snapshot should be refreshed.</param>
+    /// <pre><paramref name="minionIdentity"/> may be null or refer to a duplicate that is still initializing.</pre>
+    /// <post>When required components are available, the cached snapshot has been updated and subscribers have been notified.</post>
     private static void UpdateBioData(MinionIdentity minionIdentity)
     {
         if (minionIdentity == null)
@@ -98,8 +116,12 @@ public static class DuplicateBioDataPatches
     }
 
     /// <summary>
-    /// Get or create bio data for a minion
+    /// Returns the cached bio-data wrapper for a duplicate, creating it on first access.
     /// </summary>
+    /// <param name="minionIdentity">The duplicate whose wrapper should be returned.</param>
+    /// <returns>The cached or newly created wrapper for the duplicate.</returns>
+    /// <pre><paramref name="minionIdentity"/> is expected to be non-null and stable for dictionary lookup.</pre>
+    /// <post>The cache contains an entry for <paramref name="minionIdentity"/>.</post>
     private static DuplicateBioData GetOrCreateBioData(MinionIdentity minionIdentity)
     {
         if (!bioDataCache.TryGetValue(minionIdentity, out DuplicateBioData bioData))
@@ -113,13 +135,17 @@ public static class DuplicateBioDataPatches
     #region Public API
 
     /// <summary>
-    /// Event triggered when bio data is updated
+    /// Raised after a duplicate bio-data snapshot has been refreshed successfully.
     /// </summary>
     public static System.Action<MinionIdentity, DuplicateBioData>? OnBioDataUpdated;
 
     /// <summary>
-    /// Get bio data for a specific duplicate
+    /// Gets the bio data snapshot for a specific duplicate.
     /// </summary>
+    /// <param name="minionIdentity">The duplicate whose snapshot should be returned.</param>
+    /// <returns>The current snapshot for the duplicate, or <c>null</c> when the duplicate reference is unavailable.</returns>
+    /// <pre><paramref name="minionIdentity"/> refers to a live duplicate when a non-null result is expected.</pre>
+    /// <post>The returned snapshot has been refreshed recently or computed on demand and may be served from the performance cache.</post>
     public static DuplicateBioData? GetBioData(MinionIdentity minionIdentity)
     {
         if (minionIdentity == null)
@@ -139,8 +165,11 @@ public static class DuplicateBioDataPatches
     }
 
     /// <summary>
-    /// Get bio data for all duplicates
+    /// Gets bio data for all currently live duplicates.
     /// </summary>
+    /// <returns>A new dictionary snapshot keyed by the live duplicates found at call time.</returns>
+    /// <pre>The live minion component registry is available.</pre>
+    /// <post>The returned dictionary contains only duplicates for which bio data could be resolved.</post>
     public static Dictionary<MinionIdentity, DuplicateBioData> GetAllBioData()
     {
         Dictionary<MinionIdentity, DuplicateBioData> result = [];
@@ -161,16 +190,20 @@ public static class DuplicateBioDataPatches
     }
 
     /// <summary>
-    /// Clear cached bio data (useful for cleanup)
+    /// Clears the internal bio-data cache.
     /// </summary>
+    /// <pre>Callers accept that subsequent lookups will rebuild the cache lazily.</pre>
+    /// <post>The patch-layer cache is empty until new lookups or updates repopulate it.</post>
     public static void ClearCache()
     {
         bioDataCache.Clear();
     }
 
     /// <summary>
-    /// Force update all bio data
+    /// Forces a refresh attempt for all currently live duplicates.
     /// </summary>
+    /// <pre>The live minion component registry is available.</pre>
+    /// <post>Every live duplicate has been offered a refresh attempt, subject to component readiness checks.</post>
     public static void RefreshAllBioData()
     {
         foreach (MinionIdentity? minionIdentity in Components.LiveMinionIdentities.Items)
@@ -180,8 +213,10 @@ public static class DuplicateBioDataPatches
     }
 
     /// <summary>
-    /// Clean up dead duplicates from cache
+    /// Removes dead or invalid duplicate entries from the cache.
     /// </summary>
+    /// <pre>The cache may contain entries for duplicates that have died or been destroyed.</pre>
+    /// <post>Any cache entry whose key is invalid or whose bio-data snapshot is dead has been removed.</post>
     public static void CleanupDeadDuplicates()
     {
         List<MinionIdentity> keysToRemove = [];

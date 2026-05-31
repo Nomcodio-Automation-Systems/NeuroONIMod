@@ -8,7 +8,6 @@ namespace NeuroMod.Tests.Websocket;
 /// <summary>
 /// Tests for WebSocket components that don't require Unity dependencies
 /// </summary>
-[TestFixture]
 public class WebsocketTests
 {
     [Test]

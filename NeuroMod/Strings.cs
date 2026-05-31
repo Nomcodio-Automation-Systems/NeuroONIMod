@@ -6,6 +6,11 @@ using System.Runtime.CompilerServices;
 
 namespace NeuroSdk;
 
+/// <summary>
+/// Centralizes reusable protocol and validation message strings for the Neuro SDK layer.
+/// </summary>
+/// <pre>Callers need stable user-facing or protocol-facing messages for common validation failures.</pre>
+/// <post>Constants and format strings remain available from a single internal source of truth.</post>
 internal static class Strings
 {
     public static readonly FormatString MessageHandlerFailedCaughtException = "Message handler failed with exception: {0}";

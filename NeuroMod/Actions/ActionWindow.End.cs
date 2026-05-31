@@ -1,13 +1,17 @@
 #nullable enable
 
 using System;
+using System.Diagnostics;
 using UnityEngine;
+using NeuroMod;
 
 namespace NeuroSdk.Actions;
 
 /// <summary>
-/// Partial class containing End Management functionality for ActionWindow
+/// Contains end-management functionality for <see cref="ActionWindow"/>.
 /// </summary>
+/// <pre>The action window may be configured with end conditions or explicit shutdown requests.</pre>
+/// <post>These helpers transition the window toward cleanup while preserving lifecycle invariants.</post>
 public sealed partial class ActionWindow
 {
     #region End Management
@@ -21,6 +25,8 @@ public sealed partial class ActionWindow
     /// <param name="shouldEnd">Function that returns true when the window should be ended</param>
     /// <returns>The <see cref="ActionWindow"/> itself for method chaining</returns>
     /// <exception cref="ArgumentNullException">Thrown when shouldEnd is null</exception>
+    /// <pre>The window is in the <see cref="State.Building"/> state and <paramref name="shouldEnd"/> is non-null.</pre>
+    /// <post>The end condition is stored for later evaluation while the window is registered.</post>
     /// <example>
     /// <code>
     /// window.SetEnd(() => player.IsDead || gameOver);
@@ -41,7 +47,7 @@ public sealed partial class ActionWindow
         }
 
         _shouldEndFunc = shouldEnd;
-        Debug.Log($"{LOG_PREFIX} Set custom end condition");
+        LogInfo($"Set custom end condition");
         return this;
     }
 
@@ -52,6 +58,8 @@ public sealed partial class ActionWindow
     /// <param name="afterSeconds">Time in seconds after which to end the window (must be positive)</param>
     /// <returns>The <see cref="ActionWindow"/> itself for method chaining</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when afterSeconds is not positive</exception>
+    /// <pre>The window is in the <see cref="State.Building"/> state and <paramref name="afterSeconds"/> is greater than zero.</pre>
+    /// <post>A timed end condition is stored that will become true after the configured interval elapses.</post>
     /// <example>
     /// <code>
     /// window.SetEnd(60f); // Auto-close after 60 seconds
@@ -67,7 +75,7 @@ public sealed partial class ActionWindow
         }
 
         float remainingTime = afterSeconds;
-        Debug.Log($"{LOG_PREFIX} Set timed end condition: {afterSeconds} seconds");
+        LogInfo($"Set timed end condition: {afterSeconds} seconds");
         return SetEnd(ShouldEndAfterTime);
 
         bool ShouldEndAfterTime()
@@ -81,6 +89,8 @@ public sealed partial class ActionWindow
     /// Ends the ActionWindow, unregistering all actions and cleaning up resources.
     /// This transitions the window to the Ended state and destroys the component.
     /// </summary>
+    /// <pre>The window may be in any state prior to <see cref="State.Ended"/> and may still own registered actions.</pre>
+    /// <post>Registered actions are unregistered, action ownership is cleared, the window transitions to <see cref="State.Ended"/>, and the component is destroyed.</post>
     /// <example>
     /// <code>
     /// window.End(); // Clean shutdown of the action window
@@ -90,19 +100,19 @@ public sealed partial class ActionWindow
     {
         if (CurrentState >= State.Ended)
         {
-            Debug.LogWarning($"{LOG_PREFIX} Window is already ended");
+            LogWarn($"Window is already ended");
             return;
         }
-
+        Stopwatch sw = Stopwatch.StartNew();
         try
         {
-            Debug.Log($"{LOG_PREFIX} Ending window with {_actions.Count} actions in state {CurrentState}");
+            LogInfo($"Ending window with {_actions.Count} actions in state {CurrentState}");
 
             // Unregister actions if they were registered
             if (CurrentState >= State.Registered)
             {
                 NeuroActionHandler.UnregisterActions(_actions);
-                Debug.Log($"{LOG_PREFIX} Unregistered {_actions.Count} actions");
+                LogInfo($"Unregistered {_actions.Count} actions");
             }
 
             // Clear all function references to prevent memory leaks
@@ -116,22 +126,23 @@ public sealed partial class ActionWindow
             {
                 try
                 {
-                    action.SetActionWindow(null!);
+                    action.SetActionWindow(null);
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"{LOG_PREFIX} Failed to clear action window for '{action.Name}': {ex.Message}");
+                    LogWarn($"Failed to clear action window for '{action.Name}': {ex.Message}");
                 }
             }
 
+            State prev = CurrentState;
             CurrentState = State.Ended;
-            Debug.Log($"{LOG_PREFIX} Window ended successfully");
+            LogInfo($"Window ended successfully; prevState={prev}; duration={sw.ElapsedMilliseconds}ms");
             Destroy(this);
         }
         catch (Exception ex)
         {
-            Debug.LogError($"{LOG_PREFIX} Error during End(): {ex.Message}");
-            Debug.LogException(ex);
+            LogError($"Error during End(): {ex.Message}");
+            NeuroLogger.LogException(ex, "ActionWindow.End", "ActionWindow", _windowId.ToString());
             CurrentState = State.Ended;
             Destroy(this);
         }
@@ -140,11 +151,13 @@ public sealed partial class ActionWindow
     /// <summary>
     /// Unity OnDestroy method - ensures proper cleanup when the component is destroyed
     /// </summary>
+    /// <pre>The Unity component is being destroyed and the window may not yet be in the ended state.</pre>
+    /// <post>If needed, end cleanup has been triggered before destruction completes.</post>
     private void OnDestroy()
     {
         if (CurrentState != State.Ended)
         {
-            Debug.Log($"{LOG_PREFIX} Component being destroyed, forcing end");
+            LogInfo($"Component being destroyed, forcing end");
             End();
         }
     }

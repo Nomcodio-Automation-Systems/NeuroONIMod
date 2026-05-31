@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -6,12 +7,16 @@ namespace NeuroMod;
 /// <summary>
 /// Example usage and test methods for the duplicate schedule control system
 /// </summary>
+/// <pre>These helpers are invoked manually for diagnostics, experimentation, or controlled debugging workflows.</pre>
+/// <post>Example operations demonstrate how to apply and inspect schedule overrides without changing the core control APIs.</post>
 public static class ScheduleControlExamples
 {
     /// <summary>
     /// Example: Set a duplicate to work-focused schedule
     /// </summary>
     /// <param name="duplicateName">Name of the duplicate to modify</param>
+    /// <pre><paramref name="duplicateName"/> identifies a live duplicate by full or partial in-game name.</pre>
+    /// <post>The matching duplicate uses the work-focused custom schedule when one is found.</post>
     public static void SetDuplicateToWorkFocused(string duplicateName)
     {
         Schedulable? schedulable = FindDuplicateByName(duplicateName);
@@ -22,7 +27,7 @@ public static class ScheduleControlExamples
         }
 
         Schedule workSchedule = CustomScheduleFactory.CreateWorkFocusedSchedule();
-        DuplicateScheduleControlPatches.SetCustomSchedule(schedulable, workSchedule);
+        ScheduleOverrideApi.SetCustomSchedule(schedulable, workSchedule);
 
         Debug.Log($"[ScheduleControlExamples] Set {duplicateName} to work-focused schedule (20h work, 2h recreation, 2h sleep)");
     }
@@ -31,6 +36,8 @@ public static class ScheduleControlExamples
     /// Example: Force a duplicate to only sleep
     /// </summary>
     /// <param name="duplicateName">Name of the duplicate to modify</param>
+    /// <pre><paramref name="duplicateName"/> identifies a live duplicate by full or partial in-game name.</pre>
+    /// <post>The matching duplicate receives a forced sleep activity when one is found.</post>
     public static void ForceDuplicateToSleep(string duplicateName)
     {
         Schedulable? schedulable = FindDuplicateByName(duplicateName);
@@ -41,7 +48,7 @@ public static class ScheduleControlExamples
         }
 
         ScheduleBlockType sleepActivity = Db.Get().ScheduleBlockTypes.Sleep;
-        DuplicateScheduleControlPatches.ForceActivity(schedulable, sleepActivity);
+        ScheduleOverrideApi.ForceActivity(schedulable, sleepActivity);
 
         Debug.Log($"[ScheduleControlExamples] Forced {duplicateName} to sleep until cleared");
     }
@@ -50,6 +57,8 @@ public static class ScheduleControlExamples
     /// Example: Force a duplicate to only work
     /// </summary>
     /// <param name="duplicateName">Name of the duplicate to modify</param>
+    /// <pre><paramref name="duplicateName"/> identifies a live duplicate by full or partial in-game name.</pre>
+    /// <post>The matching duplicate receives a forced work activity when one is found.</post>
     public static void ForceDuplicateToWork(string duplicateName)
     {
         Schedulable? schedulable = FindDuplicateByName(duplicateName);
@@ -60,7 +69,7 @@ public static class ScheduleControlExamples
         }
 
         ScheduleBlockType workActivity = Db.Get().ScheduleBlockTypes.Work;
-        DuplicateScheduleControlPatches.ForceActivity(schedulable, workActivity);
+        ScheduleOverrideApi.ForceActivity(schedulable, workActivity);
 
         Debug.Log($"[ScheduleControlExamples] Forced {duplicateName} to work until cleared");
     }
@@ -69,6 +78,8 @@ public static class ScheduleControlExamples
     /// Example: Clear all custom controls for a duplicate
     /// </summary>
     /// <param name="duplicateName">Name of the duplicate to clear controls for</param>
+    /// <pre><paramref name="duplicateName"/> identifies a live duplicate by full or partial in-game name.</pre>
+    /// <post>Any custom schedule or forced activity is cleared for the matching duplicate.</post>
     public static void ClearDuplicateControls(string duplicateName)
     {
         Schedulable? schedulable = FindDuplicateByName(duplicateName);
@@ -78,8 +89,8 @@ public static class ScheduleControlExamples
             return;
         }
 
-        DuplicateScheduleControlPatches.ClearCustomSchedule(schedulable);
-        DuplicateScheduleControlPatches.ClearForcedActivity(schedulable);
+        ScheduleOverrideApi.ClearCustomSchedule(schedulable);
+        ScheduleOverrideApi.ClearForcedActivity(schedulable);
 
         Debug.Log($"[ScheduleControlExamples] Cleared all custom controls for {duplicateName} - back to default schedule");
     }
@@ -87,15 +98,17 @@ public static class ScheduleControlExamples
     /// <summary>
     /// Example: Apply balanced schedule to all duplicates
     /// </summary>
+    /// <pre>Live schedulables are available in the current world.</pre>
+    /// <post>Every live duplicate receives the balanced custom schedule override.</post>
     public static void SetAllDuplicatesToBalanced()
     {
-        Schedulable[] allSchedulables = Object.FindObjectsOfType<Schedulable>();
+        Schedulable[] allSchedulables = UnityEngine.Object.FindObjectsOfType<Schedulable>();
         Schedule balancedSchedule = CustomScheduleFactory.CreateBalancedSchedule();
 
         int count = 0;
         foreach (Schedulable schedulable in allSchedulables)
         {
-            DuplicateScheduleControlPatches.SetCustomSchedule(schedulable, balancedSchedule);
+            ScheduleOverrideApi.SetCustomSchedule(schedulable, balancedSchedule);
             count++;
         }
 
@@ -106,6 +119,8 @@ public static class ScheduleControlExamples
     /// Example: Create a custom research team
     /// </summary>
     /// <param name="duplicateNames">List of duplicate names to add to research team</param>
+    /// <pre><paramref name="duplicateNames"/> contains live duplicate names or partial names to resolve.</pre>
+    /// <post>Each matching duplicate is assigned the research-focused custom schedule.</post>
     public static void CreateResearchTeam(List<string> duplicateNames)
     {
         Schedule researchSchedule = CustomScheduleFactory.CreateResearchFocusedSchedule();
@@ -116,7 +131,7 @@ public static class ScheduleControlExamples
             Schedulable? schedulable = FindDuplicateByName(name);
             if (schedulable != null)
             {
-                DuplicateScheduleControlPatches.SetCustomSchedule(schedulable, researchSchedule);
+                ScheduleOverrideApi.SetCustomSchedule(schedulable, researchSchedule);
                 Debug.Log($"[ScheduleControlExamples] Added {name} to research team");
                 successCount++;
             }
@@ -132,6 +147,8 @@ public static class ScheduleControlExamples
     /// <summary>
     /// Example: Get statistics about current schedule usage
     /// </summary>
+    /// <pre>The schedule-control manager may already be available in the current session.</pre>
+    /// <post>Current schedule statistics are logged when the manager is available.</post>
     public static void PrintScheduleStatistics()
     {
         if (ScheduleControlManager.Instance == null)
@@ -169,9 +186,11 @@ public static class ScheduleControlExamples
     /// <summary>
     /// Example: List all duplicates and their current status
     /// </summary>
+    /// <pre>Live schedulables are available in the current world.</pre>
+    /// <post>Each live duplicate is logged with either default, custom-schedule, or forced-activity status.</post>
     public static void ListAllDuplicatesWithStatus()
     {
-        Schedulable[] allSchedulables = Object.FindObjectsOfType<Schedulable>();
+        Schedulable[] allSchedulables = UnityEngine.Object.FindObjectsOfType<Schedulable>();
 
         Debug.Log("[ScheduleControlExamples] === All Duplicates Status ===");
         foreach (Schedulable schedulable in allSchedulables)
@@ -201,6 +220,8 @@ public static class ScheduleControlExamples
     /// </summary>
     /// <param name="name">Name to search for (partial matches allowed)</param>
     /// <returns>The schedulable for the duplicate, or null if not found</returns>
+    /// <pre><paramref name="name"/> is a non-empty duplicate identifier or partial name fragment.</pre>
+    /// <post>The first case-insensitive partial name match is returned when one exists.</post>
     private static Schedulable? FindDuplicateByName(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -209,11 +230,11 @@ public static class ScheduleControlExamples
             return null;
         }
 
-        Schedulable[] allSchedulables = Object.FindObjectsOfType<Schedulable>();
+        Schedulable[] allSchedulables = UnityEngine.Object.FindObjectsOfType<Schedulable>();
 
         foreach (Schedulable schedulable in allSchedulables)
         {
-            if (schedulable.GetProperName().Contains(name))
+            if (schedulable.GetProperName().IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 return schedulable;
             }
@@ -225,6 +246,8 @@ public static class ScheduleControlExamples
     /// <summary>
     /// Example: Demonstration of different schedule types
     /// </summary>
+    /// <pre>Predefined schedule templates are available from <see cref="CustomScheduleFactory"/>.</pre>
+    /// <post>Available predefined schedule templates are logged for diagnostics.</post>
     public static void DemonstrateScheduleTypes()
     {
         Debug.Log("[ScheduleControlExamples] === Available Schedule Types ===");
@@ -242,6 +265,8 @@ public static class ScheduleControlExamples
     /// Validate that all required systems are available
     /// </summary>
     /// <returns>True if all systems are ready for schedule control</returns>
+    /// <pre>Core schedule systems may or may not be initialized for the current session.</pre>
+    /// <post>The method reports whether core schedule-control dependencies are ready.</post>
     public static bool ValidateSystemsReady()
     {
         bool allReady = true;

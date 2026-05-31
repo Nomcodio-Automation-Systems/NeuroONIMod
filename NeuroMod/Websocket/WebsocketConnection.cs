@@ -10,6 +10,7 @@ using Newtonsoft.Json.Linq;
 using System;
 using System.Text;
 using System.Threading.Tasks;
+using System.Diagnostics;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.Networking;
@@ -20,6 +21,12 @@ namespace NeuroSdk.Websocket;
 /// Manages WebSocket connection to the Neuro SDK server
 /// Handles connection lifecycle, message queuing, and automatic reconnection
 /// </summary>
+/// <pre>
+/// The Unity runtime can host a single websocket connection component and the outbound queue is initialized.
+/// </pre>
+/// <post>
+/// The component can establish a websocket connection, dispatch inbound commands, and flush queued outbound messages.
+/// </post>
 [PublicAPI]
 public sealed class WebsocketConnection : MonoBehaviour
 {
@@ -43,14 +50,16 @@ public sealed class WebsocketConnection : MonoBehaviour
     /// <summary>
     /// Singleton instance of the WebSocket connection
     /// </summary>
+    /// <pre>
+    /// At most one live websocket connection component should own the singleton.
+    /// </pre>
+    /// <post>
+    /// The current singleton connection instance is returned when available.
+    /// </post>
     public static WebsocketConnection? Instance
     {
         get
         {
-            if (!_instance)
-            {
-                Debug.LogWarning("Accessed WebsocketConnection.Instance without an instance being present");
-            }
             return _instance;
         }
         private set => _instance = value;
@@ -99,7 +108,7 @@ public sealed class WebsocketConnection : MonoBehaviour
     {
         if (Instance)
         {
-            Debug.Log("Destroying duplicate WebsocketConnection instance");
+            NeuroLogger.LogWarning("Destroying duplicate WebsocketConnection instance", "WebsocketConnection");
             Destroy(this);
             return;
         }
@@ -145,7 +154,7 @@ public sealed class WebsocketConnection : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.LogError($"Failed to reconnect: {ex.Message}");
+            NeuroLogger.LogError($"Failed to reconnect: {ex.Message}", "WebsocketConnection");
         }
     }
 
@@ -154,6 +163,7 @@ public sealed class WebsocketConnection : MonoBehaviour
     /// </summary>
     private async Task StartWs()
     {
+        Stopwatch sw = Stopwatch.StartNew();
         try
         {
             NeuroLogger.Log("Starting WebSocket connection...", "WebsocketConnection");
@@ -169,10 +179,12 @@ public sealed class WebsocketConnection : MonoBehaviour
 
             NeuroLogger.Log($"Attempting to connect to: {websocketUrl}", "WebsocketConnection");
             await EstablishConnection(websocketUrl!);
+            NeuroLogger.Log($"StartWs completed in {sw.ElapsedMilliseconds}ms", "WebsocketConnection");
         }
         catch (Exception ex)
         {
             NeuroLogger.LogError($"Failed to start WebSocket connection: {ex.Message}", "WebsocketConnection");
+            NeuroLogger.LogException(ex, "WebsocketConnection.StartWs", "WebsocketConnection");
             onError?.Invoke(ex.Message);
         }
     }
@@ -191,7 +203,7 @@ public sealed class WebsocketConnection : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"Error closing existing connection: {ex.Message}");
+            NeuroLogger.LogWarning($"Error closing existing connection: {ex.Message}", "WebsocketConnection");
         }
     }
 
@@ -264,7 +276,7 @@ public sealed class WebsocketConnection : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"Failed to parse URL parameter: {ex.Message}");
+            NeuroLogger.LogWarning($"Failed to parse URL parameter: {ex.Message}", "WebsocketConnection");
             return null;
         }
     }
@@ -291,7 +303,7 @@ public sealed class WebsocketConnection : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"Failed to get URL from web request: {ex.Message}");
+            NeuroLogger.LogWarning($"Failed to get URL from web request: {ex.Message}", "WebsocketConnection");
             return null;
         }
     }
@@ -309,7 +321,7 @@ public sealed class WebsocketConnection : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.LogWarning($"Failed to get URL from environment: {ex.Message}");
+            NeuroLogger.LogWarning($"Failed to get URL from environment: {ex.Message}", "WebsocketConnection");
             return null;
         }
     }
@@ -324,37 +336,40 @@ public sealed class WebsocketConnection : MonoBehaviour
         // WebSocket callbacks run on separate threads
         _socket = new WebSocket(websocketUrl);
 
-        _socket.OnOpen += () =>
-        {
-            NeuroLogger.Log("WebSocket connection opened successfully!", "WebsocketConnection");
-            onConnected?.Invoke();
-        };
-        _socket.OnMessage += bytes =>
-        {
-            string message = Encoding.UTF8.GetString(bytes);
-            NeuroLogger.LogDebug($"Received message: {message}", "WebsocketConnection");
-            _ = Task.Run(async () => await ReceiveMessage(message));
-        };
-        _socket.OnError += error =>
-        {
-            NeuroLogger.LogError($"WebSocket error: {error}", "WebsocketConnection");
-            onError?.Invoke(error);
-            if (error != "Unable to connect to the remote server")
+            _socket.OnOpen += NeuroMod.Api.EventSubscriber.WrapWebsocketOpen("WebsocketConnection.OnOpen", () =>
             {
-                Debug.LogError("WebSocket connection encountered an error!");
-                Debug.LogError(error);
-            }
-        };
-        _socket.OnClose += code =>
-        {
-            NeuroLogger.LogWarning($"WebSocket connection closed with code {code}", "WebsocketConnection");
-            onDisconnected?.Invoke(code);
-            if (code != WebSocketCloseCode.Abnormal)
+                NeuroLogger.Log("WebSocket connection opened successfully!", "WebsocketConnection");
+                onConnected?.Invoke();
+            });
+
+            _socket.OnMessage += NeuroMod.Api.EventSubscriber.WrapWebsocketMessage("WebsocketConnection.OnMessage", bytes =>
             {
-                Debug.LogWarning($"WebSocket connection closed with code {code}!");
-            }
-            _ = Task.Run(async () => await Reconnect());
-        };
+                string message = Encoding.UTF8.GetString(bytes);
+                NeuroLogger.LogDebug($"Received message: {message}", "WebsocketConnection");
+                _ = Task.Run(async () => await ReceiveMessage(message));
+            });
+
+            _socket.OnError += NeuroMod.Api.EventSubscriber.WrapWebsocketError("WebsocketConnection.OnError", error =>
+            {
+                NeuroLogger.LogError($"WebSocket error: {error}", "WebsocketConnection");
+                onError?.Invoke(error);
+                if (error != "Unable to connect to the remote server")
+                {
+                    NeuroLogger.LogError("WebSocket connection encountered an error!", "WebsocketConnection");
+                    NeuroLogger.LogError(error, "WebsocketConnection");
+                }
+            });
+
+            _socket.OnClose += NeuroMod.Api.EventSubscriber.WrapWebsocketClose("WebsocketConnection.OnClose", code =>
+            {
+                NeuroLogger.LogWarning($"WebSocket connection closed with code {code}", "WebsocketConnection");
+                onDisconnected?.Invoke(code);
+                if (code != WebSocketCloseCode.Abnormal)
+                {
+                    NeuroLogger.LogWarning($"WebSocket connection closed with code {code}!", "WebsocketConnection");
+                }
+                _ = Task.Run(async () => await Reconnect());
+            });
 
         NeuroLogger.LogDebug("Attempting to connect WebSocket...", "WebsocketConnection");
         await _socket.Connect();
@@ -385,12 +400,15 @@ public sealed class WebsocketConnection : MonoBehaviour
         try
         {
             string message = Jason.Serialize(builder.GetWsMessage());
-            Debug.Log($"Sending WebSocket message: {message}");
+            NeuroLogger.LogDebug($"Sending WebSocket message: {message}", "WebsocketConnection");
+            Stopwatch sw = Stopwatch.StartNew();
             await _socket!.SendText(message);
+            NeuroLogger.LogDebug($"Sent WebSocket message in {sw.ElapsedMilliseconds}ms", "WebsocketConnection");
         }
         catch (Exception ex)
         {
-            Debug.LogError($"Failed to send WebSocket message: {ex.Message}");
+            NeuroLogger.LogError($"Failed to send WebSocket message: {ex.Message}", "WebsocketConnection");
+            NeuroLogger.LogException(ex, "WebsocketConnection.SendTask", "WebsocketConnection");
             messageQueue.Enqueue(builder);
         }
     }
@@ -403,7 +421,7 @@ public sealed class WebsocketConnection : MonoBehaviour
         try
         {
             await UniTask.Yield();
-            Debug.Log($"Received WebSocket message: {msgData}");
+            NeuroLogger.LogDebug($"Received WebSocket message: {msgData}", "WebsocketConnection");
 
             JObject message = JObject.Parse(msgData);
             string? command = message["command"]?.Value<string>();
@@ -411,7 +429,7 @@ public sealed class WebsocketConnection : MonoBehaviour
 
             if (command == null)
             {
-                Debug.LogError("Received command that could not be deserialized");
+                NeuroLogger.LogError("Received command that could not be deserialized", "WebsocketConnection");
                 return;
             }
 
@@ -419,8 +437,8 @@ public sealed class WebsocketConnection : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.LogError($"Failed to process received message: {ex.Message}");
-            Debug.LogError(ex);
+            NeuroLogger.LogError($"Failed to process received message: {ex.Message}", "WebsocketConnection");
+            NeuroLogger.LogException(ex, "WebsocketConnection.ReceiveMessage", "WebsocketConnection");
         }
     }
 
@@ -432,6 +450,12 @@ public sealed class WebsocketConnection : MonoBehaviour
     /// Queues a message for sending
     /// </summary>
     /// <param name="messageBuilder">The message builder to queue</param>
+    /// <pre>
+    /// <paramref name="messageBuilder"/> contains a valid outgoing SDK message description.
+    /// </pre>
+    /// <post>
+    /// The outgoing message has been appended to the transport queue.
+    /// </post>
     public void Send(OutgoingMessageBuilder messageBuilder)
     {
         messageQueue.Enqueue(messageBuilder);
@@ -441,6 +465,12 @@ public sealed class WebsocketConnection : MonoBehaviour
     /// Sends a message immediately without queuing
     /// </summary>
     /// <param name="messageBuilder">The message builder to send</param>
+    /// <pre>
+    /// <paramref name="messageBuilder"/> can be serialized immediately on the current websocket connection.
+    /// </pre>
+    /// <post>
+    /// Immediate websocket delivery has been attempted without queueing the message.
+    /// </post>
     public void SendImmediate(OutgoingMessageBuilder messageBuilder)
     {
         try
@@ -449,16 +479,17 @@ public sealed class WebsocketConnection : MonoBehaviour
 
             if (_socket?.State is not WebSocketState.Open)
             {
-                Debug.LogError($"WebSocket not open - failed to send immediate message: {message}");
+                NeuroLogger.LogError($"WebSocket not open - failed to send immediate message: {message}", "WebsocketConnection");
                 return;
             }
 
-            Debug.Log($"Sending immediate WebSocket message: {message}");
+            NeuroLogger.LogDebug($"Sending immediate WebSocket message: {message}", "WebsocketConnection");
             _socket.SendText(message);
         }
         catch (Exception ex)
         {
-            Debug.LogError($"Failed to send immediate message: {ex.Message}");
+            NeuroLogger.LogError($"Failed to send immediate message: {ex.Message}", "WebsocketConnection");
+            NeuroLogger.LogException(ex, "WebsocketConnection.SendImmediate", "WebsocketConnection");
         }
     }
 
@@ -470,12 +501,18 @@ public sealed class WebsocketConnection : MonoBehaviour
     /// Attempts to send a message via the singleton instance
     /// </summary>
     /// <param name="messageBuilder">The message builder to send</param>
+    /// <pre>
+    /// The caller still relies on the deprecated singleton send path.
+    /// </pre>
+    /// <post>
+    /// The message is forwarded through the live singleton instance when one exists.
+    /// </post>
     [Obsolete("Use WebsocketConnection.Instance.Send instead")]
     public static void TrySend(OutgoingMessageBuilder messageBuilder)
     {
         if (Instance == null)
         {
-            Debug.LogError("Cannot send message - WebsocketConnection instance is null");
+            NeuroLogger.LogError("Cannot send message - WebsocketConnection instance is null", "WebsocketConnection");
             return;
         }
         Instance.Send(messageBuilder);
@@ -485,12 +522,18 @@ public sealed class WebsocketConnection : MonoBehaviour
     /// Attempts to send an immediate message via the singleton instance
     /// </summary>
     /// <param name="messageBuilder">The message builder to send</param>
+    /// <pre>
+    /// The caller still relies on the deprecated singleton immediate-send path.
+    /// </pre>
+    /// <post>
+    /// Immediate sending is forwarded through the live singleton instance when one exists.
+    /// </post>
     [Obsolete("Use WebsocketConnection.Instance.SendImmediate instead")]
     public static void TrySendImmediate(OutgoingMessageBuilder messageBuilder)
     {
         if (Instance == null)
         {
-            Debug.LogError("Cannot send immediate message - WebsocketConnection instance is null");
+            NeuroLogger.LogError("Cannot send immediate message - WebsocketConnection instance is null", "WebsocketConnection");
             return;
         }
         Instance.SendImmediate(messageBuilder);
@@ -512,7 +555,7 @@ public sealed class WebsocketConnection : MonoBehaviour
 #if UNITY_WEBGL
         errMessage += " You need to specify a WebSocketURL query parameter in the URL or open a local server that serves the NEURO_SDK_WS_URL environment variable. See the documentation for more information.";
 #endif
-        Debug.LogError(errMessage);
+        NeuroLogger.LogError(errMessage, "WebsocketConnection");
     }
 
     /// <summary>

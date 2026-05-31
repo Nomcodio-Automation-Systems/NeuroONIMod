@@ -3,6 +3,7 @@ using NeuroSdk.Actions;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Diagnostics;
 using UnityEngine;
 
 namespace NeuroMod;
@@ -11,6 +12,12 @@ namespace NeuroMod;
 /// Main integration manager that coordinates between ONI duplicate systems and Neuro SDK
 /// Registers all Neuro Actions and manages the integration bridge
 /// </summary>
+/// <pre>
+/// The game has initialized enough colony state for the configured duplicant and SDK action system to be available.
+/// </pre>
+/// <post>
+/// The manager can locate the configured duplicant, register production actions, and keep the integration bridge alive.
+/// </post>
 public class NeuroIntegrationManager : KMonoBehaviour
 {
     public static NeuroIntegrationManager? Instance { get; private set; }
@@ -20,7 +27,7 @@ public class NeuroIntegrationManager : KMonoBehaviour
     private bool isInitialized = false;
 
     // Registered Neuro Actions
-    private readonly List<INeuroAction> registeredActions = [];
+    private readonly List<INeuroAction> registeredActions = new List<INeuroAction>();
 
     protected override void OnPrefabInit()
     {
@@ -33,8 +40,21 @@ public class NeuroIntegrationManager : KMonoBehaviour
     {
         base.OnSpawn();
 
+        // Resend registered actions whenever the WebSocket (re)connects so the Neuro server
+        // always has a full action list even if registration fired before the connection was open.
+        if (NeuroSdk.Websocket.WebsocketConnection.Instance != null)
+        {
+            NeuroSdk.Websocket.WebsocketConnection.Instance.onConnected?.AddListener(OnWebSocketConnected);
+        }
+
         // Initialize the integration when the manager spawns
         InitializeIntegration();
+    }
+
+    private void OnWebSocketConnected()
+    {
+        NeuroLogger.Log("WebSocket connected – resending registered actions", "NeuroIntegrationManager");
+        NeuroActionHandler.ResendRegisteredActions();
     }
 
     private void InitializeIntegration()
@@ -46,6 +66,7 @@ public class NeuroIntegrationManager : KMonoBehaviour
 
         try
         {
+            Stopwatch sw = Stopwatch.StartNew();
             NeuroLogger.Log("Starting integration initialization...", "NeuroIntegrationManager");
 
             // Find the Neuro duplicate
@@ -59,6 +80,9 @@ public class NeuroIntegrationManager : KMonoBehaviour
                 // Register all Neuro Actions
                 RegisterNeuroActions();
 
+                // Attach eating tracker so meal history is collected from now on.
+                EatingTracker.Attach(neuroMinion);
+
                 // Mark as initialized
                 isInitialized = true;
 
@@ -69,7 +93,7 @@ public class NeuroIntegrationManager : KMonoBehaviour
                 // Use safe context sending with fallback
                 SafeSendContext(welcomeMessage, true);
 
-                NeuroLogger.Log("Integration initialization completed successfully", "NeuroIntegrationManager");
+                NeuroLogger.Log($"Integration initialization completed successfully in {sw.ElapsedMilliseconds}ms", "NeuroIntegrationManager");
             }
             else
             {
@@ -104,7 +128,7 @@ public class NeuroIntegrationManager : KMonoBehaviour
             // Get configured duplicant name from settings - NO hardcoded values
             if (ConfigManager.Instance?.Config?.Duplicant?.DefaultName == null)
             {
-                Debug.LogError("[NeuroIntegrationManager] ConfigManager or DefaultName is null - cannot find duplicant!");
+                NeuroLogger.LogError("ConfigManager or DefaultName is null - cannot find duplicant!", "NeuroIntegrationManager");
                 return;
             }
 
@@ -127,23 +151,23 @@ public class NeuroIntegrationManager : KMonoBehaviour
 
             if (neuroMinion != null)
             {
-                Debug.Log($"[NeuroIntegrationManager] Found configured duplicate: {neuroMinion.GetProperName()}");
+                NeuroLogger.Log($"Found configured duplicate: {neuroMinion.GetProperName()}", "NeuroIntegrationManager");
             }
             else
             {
-                Debug.LogWarning($"[NeuroIntegrationManager] No duplicate matching '{configuredName}' found");
+                NeuroLogger.LogWarning($"No duplicate matching '{configuredName}' found", "NeuroIntegrationManager");
 
                 // Fallback: use the first available minion if configured duplicate doesn't exist
                 if (allMinions.Count > 0)
                 {
                     neuroMinion = allMinions[0];
-                    Debug.Log($"[NeuroIntegrationManager] Using fallback duplicate: {neuroMinion.GetProperName()}");
+                    NeuroLogger.Log($"Using fallback duplicate: {neuroMinion.GetProperName()}", "NeuroIntegrationManager");
                 }
             }
         }
         catch (Exception ex)
         {
-            Debug.LogError($"[NeuroIntegrationManager] Error finding configured minion: {ex.Message}");
+            NeuroLogger.LogError($"Error finding configured minion: {ex.Message}", "NeuroIntegrationManager");
         }
     }
 
@@ -156,16 +180,16 @@ public class NeuroIntegrationManager : KMonoBehaviour
 
             if (integrationBridge != null)
             {
-                Debug.Log("[NeuroIntegrationManager] Integration bridge created successfully");
+                NeuroLogger.Log("Integration bridge created successfully", "NeuroIntegrationManager");
             }
             else
             {
-                Debug.LogError("[NeuroIntegrationManager] Failed to create integration bridge");
+                NeuroLogger.LogError("Failed to create integration bridge", "NeuroIntegrationManager");
             }
         }
         catch (System.Exception ex)
         {
-            Debug.LogError($"[NeuroIntegrationManager] Error creating integration bridge: {ex.Message}");
+            NeuroLogger.LogError($"Error creating integration bridge: {ex.Message}", "NeuroIntegrationManager");
         }
     }
 
@@ -173,50 +197,97 @@ public class NeuroIntegrationManager : KMonoBehaviour
     {
         if (neuroMinion == null)
         {
-            Debug.LogError("[NeuroIntegrationManager] Cannot register actions - Neuro minion not found");
+            NeuroLogger.LogError("Cannot register actions - Neuro minion not found", "NeuroIntegrationManager");
             return;
+        }
+
+        NeuroLogger.Log("Registering Neuro Actions...", "NeuroIntegrationManager");
+
+        // Clear any existing actions
+        registeredActions.Clear();
+
+        // Build each action individually so a single constructor failure does not prevent the
+        // remaining actions from being created and registered.
+        var factories = new List<(string name, Func<INeuroAction> factory)>
+        {
+            // Status
+            ("GetStatusAction",           () => new GetStatusAction(neuroMinion)),
+            // Time / game speed
+            ("GetGameSpeedAction",        () => new GetGameSpeedAction()),
+            ("SetGameSpeedAction",        () => new SetGameSpeedAction()),
+            // Priority actions
+            ("ListPrioritiesAction",      () => new ListPrioritiesAction(neuroMinion)),
+            ("SetPriorityAction",         () => new SetPriorityAction(neuroMinion)),
+            // Schedule actions
+            ("GetAvailableSchedulesAction", () => new GetAvailableSchedulesAction()),
+            ("GetNeuroScheduleAction",    () => new GetNeuroScheduleAction(neuroMinion)),
+            ("SetNeuroScheduleAction",    () => new SetNeuroScheduleAction(neuroMinion)),
+            ("SetCustomScheduleAction",   () => new SetCustomScheduleAction(neuroMinion)),
+            // Errand actions
+            ("ListErrandsAction",         () => new ListErrandsAction(neuroMinion)),
+            ("AssignErrandAction",        () => new AssignErrandAction(neuroMinion)),
+            ("GetCurrentErrandAction",    () => new GetCurrentErrandAction(neuroMinion)),
+            ("GetErrandProgressAction",   () => new GetErrandProgressAction(neuroMinion)),
+            ("GetErrandPickupStatusAction", () => new GetErrandPickupStatusAction(neuroMinion)),
+            ("ClearCurrentErrandAction",  () => new ClearCurrentErrandAction(neuroMinion)),
+            // Colony discovery
+            ("ListDuplicantsAction",      () => new ListDuplicantsAction()),
+            ("GetDuplicantInfoAction",    () => new GetDuplicantInfoAction()),
+            ("GetColonyInfoAction",       () => new GetColonyInfoAction()),
+            ("ListResourcesAction",       () => new ListResourcesAction()),
+            // Colony world state
+            ("GetNotificationsAction",    () => new GetNotificationsAction()),
+            ("SetNotificationAction",     () => new SetNotificationAction()),
+            ("GetGeysersAction",          () => new GetGeysersAction()),
+            ("GetPowerStatusAction",      () => new GetPowerStatusAction()),
+            ("GetCurrentResearchAction",  () => new GetCurrentResearchAction()),
+            // Morale & thoughts
+            ("GetMoraleSourcesAction",    () => new GetMoraleSourcesAction(neuroMinion)),
+            ("GetDuplicantThoughtsAction", () => new GetDuplicantThoughtsAction(neuroMinion)),
+            // Eating / nutrition
+            ("GetEatingInfoAction",       () => new GetEatingInfoAction(neuroMinion)),
+            // Announcements
+            ("TriggerAnnouncementAction", () => new TriggerAnnouncementAction()),
+            // In-game Codex (wiki) reader
+            ("ListWikiCategoriesAction",  () => new ListWikiCategoriesAction()),
+            ("SearchWikiAction",          () => new SearchWikiAction()),
+            ("GetWikiEntryAction",        () => new GetWikiEntryAction()),
+        };
+
+        var actionsToRegister = new List<INeuroAction>(factories.Count);
+        foreach (var (name, factory) in factories)
+        {
+            try
+            {
+                actionsToRegister.Add(factory());
+            }
+            catch (System.Exception ex)
+            {
+                NeuroLogger.LogError($"Failed to create action '{name}': {ex.Message}", "NeuroIntegrationManager");
+            }
         }
 
         try
         {
-            Debug.Log("[NeuroIntegrationManager] Registering Neuro Actions...");
-
-            // Clear any existing actions
-            registeredActions.Clear();
-
-            // Create all actions first
-            List<INeuroAction> actionsToRegister = new()
-            {
-                new GetStatusAction(neuroMinion),
-                new ClearCurrentErrandAction(neuroMinion),
-                new GetNeuroScheduleAction(neuroMinion),
-                new SetPriorityAction(neuroMinion),
-                new SetNeuroScheduleAction(neuroMinion),
-                new SetCustomScheduleAction(neuroMinion),
-                new ListPrioritiesAction(neuroMinion),
-                new GetAvailableSchedulesAction(),
-                new GetBioDataAction(),
-                // Errand actions (actual chores in the world)
-                new ListErrandsAction(neuroMinion),
-                new GetCurrentErrandAction(neuroMinion),
-                new AssignErrandAction(neuroMinion)
-            };
-
-            // Register all actions at once to prevent duplicates
             NeuroActionHandler.RegisterActions(actionsToRegister);
             registeredActions.AddRange(actionsToRegister);
 
-            Debug.Log($"[NeuroIntegrationManager] Successfully registered {registeredActions.Count} Neuro Actions");
-
-            // Log all registered actions
+            NeuroLogger.Log($"Successfully registered {registeredActions.Count} of {factories.Count} Neuro Actions", "NeuroIntegrationManager");
             foreach (INeuroAction action in registeredActions)
+                NeuroLogger.Log($"Registered action: {action.Name}", "NeuroIntegrationManager");
+
+            // If the WebSocket is already open when registration completes (i.e. the connection
+            // was established before InitializeIntegration finished), force-resend the action list
+            // now so the Neuro server receives it. The onConnected listener covers future reconnects.
+            if (NeuroSdk.Websocket.WebsocketConnection.Instance?.IsConnected == true)
             {
-                Debug.Log($"[NeuroIntegrationManager] Registered action: {action.Name}");
+                NeuroLogger.Log("WebSocket already connected – resending actions after registration", "NeuroIntegrationManager");
+                NeuroActionHandler.ResendRegisteredActions();
             }
         }
         catch (System.Exception ex)
         {
-            Debug.LogError($"[NeuroIntegrationManager] Error registering Neuro Actions: {ex.Message}");
+            NeuroLogger.LogError($"Error registering Neuro Actions: {ex.Message}", "NeuroIntegrationManager");
         }
     }
 
@@ -226,9 +297,15 @@ public class NeuroIntegrationManager : KMonoBehaviour
     /// Force re-initialization of the integration system
     /// Useful when the Neuro duplicate is renamed or changes
     /// </summary>
+    /// <pre>
+    /// The manager may already hold active bridge and action registrations.
+    /// </pre>
+    /// <post>
+    /// Existing integration state is torn down and rebuilt against the current duplicant selection.
+    /// </post>
     public void ForceReinitialize()
     {
-        Debug.Log("[NeuroIntegrationManager] Forcing re-initialization...");
+        NeuroLogger.Log("Forcing re-initialization...", "NeuroIntegrationManager");
 
         isInitialized = false;
         neuroMinion = null;
@@ -253,15 +330,15 @@ public class NeuroIntegrationManager : KMonoBehaviour
         {
             if (registeredActions.Any())
             {
-                Debug.Log($"[NeuroIntegrationManager] Unregistering {registeredActions.Count} actions: {string.Join(", ", registeredActions.Select(a => a.Name))}");
+                NeuroLogger.Log($"Unregistering {registeredActions.Count} actions: {string.Join(", ", registeredActions.Select(a => a.Name))}", "NeuroIntegrationManager");
                 NeuroActionHandler.UnregisterActions(registeredActions.Select(a => a.Name).ToArray());
             }
             registeredActions.Clear();
-            Debug.Log("[NeuroIntegrationManager] Unregistered all actions");
+            NeuroLogger.Log("Unregistered all actions", "NeuroIntegrationManager");
         }
         catch (System.Exception ex)
         {
-            Debug.LogError($"[NeuroIntegrationManager] Error unregistering actions: {ex.Message}");
+            NeuroLogger.LogError($"Error unregistering actions: {ex.Message}", "NeuroIntegrationManager");
         }
     }
 
@@ -269,6 +346,12 @@ public class NeuroIntegrationManager : KMonoBehaviour
     /// Get the current Neuro duplicate
     /// </summary>
     /// <returns>The current Neuro minion, or null if not found</returns>
+    /// <pre>
+    /// Initialization may still be in progress or may have failed to find the configured duplicant.
+    /// </pre>
+    /// <post>
+    /// The currently tracked Neuro duplicant reference is returned.
+    /// </post>
     public MinionIdentity? GetNeuroMinion()
     {
         return neuroMinion;
@@ -278,6 +361,12 @@ public class NeuroIntegrationManager : KMonoBehaviour
     /// Check if the integration is active and working
     /// </summary>
     /// <returns>True if integration is fully active</returns>
+    /// <pre>
+    /// The manager may have partially initialized bridge or action state.
+    /// </pre>
+    /// <post>
+    /// The method reports whether all required integration components are active.
+    /// </post>
     public bool IsIntegrationActive()
     {
         return isInitialized && neuroMinion != null && integrationBridge != null;
@@ -287,6 +376,12 @@ public class NeuroIntegrationManager : KMonoBehaviour
     /// Get status information about the integration
     /// </summary>
     /// <returns>String describing the current integration status</returns>
+    /// <pre>
+    /// The manager may be initialized, partially initialized, or inactive.
+    /// </pre>
+    /// <post>
+    /// A human-readable status string describing the current integration state is returned.
+    /// </post>
     public string GetIntegrationStatus()
     {
         return !isInitialized
@@ -301,6 +396,7 @@ public class NeuroIntegrationManager : KMonoBehaviour
     protected override void OnCleanUp()
     {
         // Clean up when the manager is destroyed
+        EatingTracker.Detach();
         UnregisterAllActions();
 
         if (integrationBridge != null)
@@ -319,6 +415,12 @@ public class NeuroIntegrationManager : KMonoBehaviour
     /// <summary>
     /// Safely sends context message with fallback to Debug.Log if NeuroSdk context isn't available
     /// </summary>
+    /// <pre>
+    /// <paramref name="message"/> is intended for the out-of-band context channel.
+    /// </pre>
+    /// <post>
+    /// The integration manager has attempted to deliver the context update through the logger facade.
+    /// </post>
     private void SafeSendContext(string message, bool isHighPriority)
     {
         NeuroLogger.SendContext(message, isHighPriority, "NeuroIntegrationManager");
@@ -342,11 +444,11 @@ public static class GameStartPatch
             // Don't destroy on load so it persists across scenes
             UnityEngine.Object.DontDestroyOnLoad(managerGO);
 
-            Debug.Log("[GameStartPatch] NeuroIntegrationManager created and configured");
+                    NeuroLogger.Log("NeuroIntegrationManager created and configured", "GameStartPatch");
         }
         catch (Exception ex)
         {
-            Debug.LogError($"[GameStartPatch] Error creating NeuroIntegrationManager: {ex.Message}");
+                NeuroLogger.LogError($"Error creating NeuroIntegrationManager: {ex.Message}", "GameStartPatch");
         }
     }
 }
@@ -374,7 +476,7 @@ public static class MinionRenamePatch
 
                 if (nameMatches || __instance == currentNeuro)
                 {
-                    Debug.Log($"[MinionRenamePatch] Detected duplicate rename to '{name}' - checking integration");
+                    NeuroLogger.Log($"Detected duplicate rename to '{name}' - checking integration", "MinionRenamePatch");
 
                     // Delay re-initialization to allow the rename to complete
                     NeuroIntegrationManager.Instance.Invoke(nameof(NeuroIntegrationManager.ForceReinitialize), 1f);

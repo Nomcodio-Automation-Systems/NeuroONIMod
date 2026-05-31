@@ -8,7 +8,6 @@ namespace NeuroMod.Tests.Utilities;
 /// <summary>
 /// Tests for the Jason serialization utility
 /// </summary>
-[TestFixture]
 public class JasonTests
 {
     /// <summary>

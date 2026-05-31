@@ -8,14 +8,13 @@ namespace NeuroMod.Tests.Configuration;
 /// Tests for NeuroModConfig static configuration class
 /// Tests configuration properties and environment variable overrides
 /// </summary>
-[TestFixture]
 public class NeuroModConfigTests
 {
     private const string ConsoleOutputEnvVar = "NEURO_MOD_CONSOLE_OUTPUT";
     private const string DebugLoggingEnvVar = "NEURO_MOD_DEBUG_LOGGING";
 
     [SetUp]
-    public void SetUp()
+    public void Setup()
     {
         // Clean up environment variables before each test
         Environment.SetEnvironmentVariable(ConsoleOutputEnvVar, null);

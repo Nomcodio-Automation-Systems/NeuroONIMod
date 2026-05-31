@@ -1,11 +1,17 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36429.23 d17.14
+VisualStudioVersion = 17.14.36429.23
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeurosControl", "NeuroMod\NeurosControl.csproj", "{36420EE4-E4F6-4D2C-A8FC-91FDA99C0FD9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeuroMod", "NeuroMod\NeuroMod.csproj", "{36420EE4-E4F6-4D2C-A8FC-91FDA99C0FD9}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeuroMod.Tests", "NeuroMod.Tests\NeuroMod.Tests.csproj", "{B8F5E2A4-3C9D-4F8B-9E2A-1D7C8A5F6B3E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Jennifer.Wpf", "Jennifer.Wpf\Jennifer.Wpf.csproj", "{6E2F3B2C-8A4D-4B7E-9F2A-1C2D3E4F5A6B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Jennifer.Wpf.Tests", "Jennifer.Wpf.Tests\Jennifer.Wpf.Tests.csproj", "{91DE2D9C-7E51-4D48-8F20-00D7D91C72B4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NeuroMod.SystemTests", "NeuroMod.SystemTests\NeuroMod.SystemTests.csproj", "{BE4A97C4-FA3E-4E2B-A4E7-D944F42E8E6E}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -21,6 +27,18 @@ Global
 		{B8F5E2A4-3C9D-4F8B-9E2A-1D7C8A5F6B3E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B8F5E2A4-3C9D-4F8B-9E2A-1D7C8A5F6B3E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B8F5E2A4-3C9D-4F8B-9E2A-1D7C8A5F6B3E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6E2F3B2C-8A4D-4B7E-9F2A-1C2D3E4F5A6B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6E2F3B2C-8A4D-4B7E-9F2A-1C2D3E4F5A6B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6E2F3B2C-8A4D-4B7E-9F2A-1C2D3E4F5A6B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6E2F3B2C-8A4D-4B7E-9F2A-1C2D3E4F5A6B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{91DE2D9C-7E51-4D48-8F20-00D7D91C72B4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{91DE2D9C-7E51-4D48-8F20-00D7D91C72B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{91DE2D9C-7E51-4D48-8F20-00D7D91C72B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{91DE2D9C-7E51-4D48-8F20-00D7D91C72B4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BE4A97C4-FA3E-4E2B-A4E7-D944F42E8E6E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BE4A97C4-FA3E-4E2B-A4E7-D944F42E8E6E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BE4A97C4-FA3E-4E2B-A4E7-D944F42E8E6E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BE4A97C4-FA3E-4E2B-A4E7-D944F42E8E6E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

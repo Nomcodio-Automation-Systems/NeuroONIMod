@@ -6,10 +6,13 @@ namespace NeuroMod;
 /// <summary>
 /// Manages Neuro's dedicated schedule instance.
 /// Creates and maintains a separate schedule for Neuro that can be controlled independently.
-///
-/// Pre: Db.Initialize() must have completed before creating schedules
-/// Post: Neuro has her own Schedule instance that she is the sole member of
 /// </summary>
+/// <pre>
+/// The schedule database and live duplicant list are available when initialization runs.
+/// </pre>
+/// <post>
+/// Neuro has a dedicated schedule instance and can be re-bound to it whenever the schedule pattern changes.
+/// </post>
 public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
 {
     public static NeuroScheduleManager? Instance { get; private set; }
@@ -52,10 +55,13 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
     /// Manually initializes the NeuroScheduleManager.
     /// This is called either from OnSpawn (normal Unity lifecycle)
     /// or manually after AddComponent (when added after Game.OnSpawn).
-    ///
-    /// Pre: Db.Get() must be initialized
-    /// Post: _isInitialized is true, schedule is created
     /// </summary>
+    /// <pre>
+    /// The schedule database has been initialized and the manager has not already completed setup.
+    /// </pre>
+    /// <post>
+    /// The manager caches its schedule state, attempts duplicant assignment, and marks itself initialized.
+    /// </post>
     public void ManualInitialize()
     {
         // Prevent re-initialization if already done
@@ -67,9 +73,45 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
 
         NeuroLogger.Log("ManualInitialize called - starting initialization", "NeuroScheduleManager");
 
-        // Try to find existing Neuro schedule or create a new one
+        // Find the Neuro duplicant first so we can (optionally) clone their current schedule.
+        MinionIdentity? neuro = FindNeuroDuplicant();
+        Schedule? existingSchedule = null;
+
+        if (neuro == null)
+        {
+            _isInitialized = true;
+            NeuroLogger.Log("No configured duplicant found during startup - skipping dedicated schedule initialization until one is available", "NeuroScheduleManager");
+            return;
+        }
+
+        bool scheduleControlEnabled = ConfigManager.Instance?.Config?.Game?.ScheduleControlEnabled ?? true;
+        if (scheduleControlEnabled && neuro != null)
+        {
+            string scheduleName = GetScheduleName();
+            bool dedicatedAlreadyExists = ScheduleManager.Instance?.GetSchedules()
+                ?.Any(s => s.name == scheduleName) ?? false;
+
+            if (dedicatedAlreadyExists)
+            {
+                NeuroLogger.Log("Dedicated schedule already exists – skipping clone", "NeuroScheduleManager");
+            }
+            else
+            {
+                Schedulable? schedulable = neuro.GetComponent<Schedulable>();
+                existingSchedule = schedulable?.GetSchedule();
+                if (existingSchedule != null)
+                    NeuroLogger.Log($"Found existing schedule '{existingSchedule.name}' on duplicant – will clone it", "NeuroScheduleManager");
+            }
+        }
+        else if (!scheduleControlEnabled)
+        {
+            NeuroLogger.Log("ScheduleControlEnabled is disabled – balanced template will be used", "NeuroScheduleManager");
+        }
+
+        // Create (or locate) Neuro's dedicated schedule.
+        // Pass the duplicant's current schedule so it can be used as the clone source.
         NeuroLogger.Log("Calling EnsureNeuroScheduleExists...", "NeuroScheduleManager");
-        EnsureNeuroScheduleExists();
+        EnsureNeuroScheduleExists(existingSchedule);
 
         if (_neuroSchedule == null)
         {
@@ -77,10 +119,10 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
         }
         else
         {
-            NeuroLogger.Log($"Schedule created successfully: {_neuroSchedule.name}", "NeuroScheduleManager");
+            NeuroLogger.Log($"Schedule ready: {_neuroSchedule.name}", "NeuroScheduleManager");
         }
 
-        // Try to find and assign Neuro to her schedule
+        // Assign Neuro to her dedicated schedule.
         NeuroLogger.Log("Calling FindAndAssignNeuro...", "NeuroScheduleManager");
         FindAndAssignNeuro();
 
@@ -97,6 +139,31 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
         NeuroLogger.Log($"Initialization complete - initialized: {_isInitialized}, schedule: {_neuroSchedule != null}, schedulable: {_neuroSchedulable != null}", "NeuroScheduleManager");
     }
 
+    /// <summary>
+    /// Returns the <see cref="MinionIdentity"/> for the configured Neuro duplicant, or <c>null</c> if not yet spawned.
+    /// </summary>
+    /// <returns>The matching <see cref="MinionIdentity"/>, or <c>null</c>.</returns>
+    /// <pre>The configured duplicant name has been set in <see cref="ConfigManager"/>.</pre>
+    /// <post>Returns the first duplicant whose name matches the configuration, or <c>null</c>.</post>
+    private static MinionIdentity? FindNeuroDuplicant()
+    {
+        string? configuredName = ConfigManager.Instance?.Config?.Duplicant?.DefaultName;
+        if (string.IsNullOrWhiteSpace(configuredName)) return null;
+
+        System.Collections.Generic.List<MinionIdentity> minions = Components.LiveMinionIdentities.Items;
+        if (minions == null) return null;
+
+        foreach (MinionIdentity? minion in minions)
+        {
+            if (minion == null) continue;
+            string name = minion.GetProperName();
+            if (string.Equals(name, configuredName, StringComparison.OrdinalIgnoreCase)
+             || (configuredName!.Length >= 4 && name.IndexOf(configuredName, StringComparison.OrdinalIgnoreCase) >= 0))
+                return minion;
+        }
+        return null;
+    }
+
     protected override void OnCleanUp()
     {
         base.OnCleanUp();
@@ -109,11 +176,29 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
 
     /// <summary>
     /// Ensures Neuro's dedicated schedule exists in the game
-    ///
-    /// Pre: Db.Get().ScheduleGroups must be initialized
-    /// Post: _neuroSchedule is set to a valid Schedule instance
     /// </summary>
-    private void EnsureNeuroScheduleExists()
+    /// <pre>
+    /// Schedule groups and the schedule manager are available.
+    /// </pre>
+    /// <post>
+    /// <see cref="_neuroSchedule"/> refers to an existing or newly registered dedicated schedule when successful.
+    /// </post>
+    /// <summary>
+    /// Ensures Neuro's dedicated schedule exists in the game.
+    /// If a <paramref name="sourceSchedule"/> is supplied the new schedule is cloned from it,
+    /// preserving whatever block layout the duplicant already had.
+    /// Falls back to the balanced template when no source is available.
+    /// </summary>
+    /// <param name="sourceSchedule">
+    /// The schedule currently assigned to the Neuro duplicant, or <c>null</c> to use the balanced template.
+    /// </param>
+    /// <pre>
+    /// Schedule groups and the schedule manager are available.
+    /// </pre>
+    /// <post>
+    /// <see cref="_neuroSchedule"/> refers to an existing or newly registered dedicated schedule when successful.
+    /// </post>
+    private void EnsureNeuroScheduleExists(Schedule? sourceSchedule = null)
     {
         try
         {
@@ -126,33 +211,57 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
                 _neuroSchedule = existingSchedules?.FirstOrDefault(s => s.name == scheduleName);
             }
 
-            if (_neuroSchedule == null)
+            if (_neuroSchedule != null)
             {
-                NeuroLogger.Log($"Creating new schedule: {scheduleName}", "NeuroScheduleManager");
+                NeuroLogger.Log($"Found existing schedule: {scheduleName}", "NeuroScheduleManager");
+                return;
+            }
 
-                // Create a balanced default schedule template
-                Schedule tempSchedule = CustomScheduleFactory.CreateBalancedSchedule(scheduleName);
+            NeuroLogger.Log($"Creating new schedule: {scheduleName}", "NeuroScheduleManager");
 
-                if (tempSchedule != null && ScheduleManager.Instance != null)
+            if (ScheduleManager.Instance == null)
+            {
+                NeuroLogger.LogError("Failed to create duplicant's schedule: ScheduleManager.Instance is null!", "NeuroScheduleManager");
+                return;
+            }
+
+            // Determine the clone source: prefer the duplicant's current schedule,
+            // then any registered schedule, and finally a detached balanced template.
+            System.Collections.Generic.List<Schedule> registered = ScheduleManager.Instance.GetSchedules();
+            Schedule? cloneSource = sourceSchedule
+                ?? (registered?.Count > 0 ? registered[0] : null);
+
+            if (cloneSource == null)
+            {
+                cloneSource = CustomScheduleFactory.CreateBalancedSchedule(scheduleName);
+                NeuroLogger.Log("No registered schedules available - using detached balanced template as duplication source", "NeuroScheduleManager");
+            }
+
+            _neuroSchedule = ScheduleManager.Instance.DuplicateSchedule(cloneSource);
+
+            // When no duplicant schedule was available, overwrite with the balanced template.
+            if (sourceSchedule == null)
+            {
+                NeuroLogger.Log("No duplicant schedule found – applying balanced template", "NeuroScheduleManager");
+                Schedule balancedTemplate = CustomScheduleFactory.CreateBalancedSchedule(scheduleName);
+                System.Collections.Generic.List<ScheduleBlock>? templateBlocks = balancedTemplate.GetBlocks();
+                if (templateBlocks != null && templateBlocks.Count == 24)
                 {
-                    // Use ScheduleManager.DuplicateSchedule to properly register it
-                    // This creates a copy with the same blocks and adds it to the schedules list
-                    _neuroSchedule = ScheduleManager.Instance.DuplicateSchedule(tempSchedule);
-
-                    // Update the name to match our configured name
-                    _neuroSchedule.name = scheduleName;
-
-                    NeuroLogger.Log($"Successfully created and registered schedule: {scheduleName}", "NeuroScheduleManager");
-                }
-                else
-                {
-                    NeuroLogger.LogError("Failed to create duplicant's schedule!", "NeuroScheduleManager");
+                    for (int i = 0; i < 24; i++)
+                    {
+                        ScheduleGroup? group = Db.Get().ScheduleGroups.FindGroupForScheduleTypes(templateBlocks[i].allowed_types);
+                        if (group != null)
+                            _neuroSchedule.SetBlockGroup(i, group);
+                    }
                 }
             }
             else
             {
-                NeuroLogger.Log($"Found existing schedule: {scheduleName}", "NeuroScheduleManager");
+                NeuroLogger.Log($"Cloned schedule from '{cloneSource.name}' – preserving existing blocks", "NeuroScheduleManager");
             }
+
+            _neuroSchedule.name = scheduleName;
+            NeuroLogger.Log($"Successfully created and registered schedule: {scheduleName}", "NeuroScheduleManager");
         }
         catch (Exception ex)
         {
@@ -162,10 +271,13 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
 
     /// <summary>
     /// Finds Neuro duplicant and assigns her to her dedicated schedule
-    ///
-    /// Pre: _neuroSchedule must exist
-    /// Post: Neuro is assigned to her own schedule instance
     /// </summary>
+    /// <pre>
+    /// <see cref="_neuroSchedule"/> exists and the configured duplicant name can be resolved.
+    /// </pre>
+    /// <post>
+    /// <see cref="_neuroSchedulable"/> is set when the configured duplicant is found and assigned to the dedicated schedule.
+    /// </post>
     private void FindAndAssignNeuro()
     {
         try
@@ -242,10 +354,13 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
 
     /// <summary>
     /// Assigns Neuro's Schedulable to her dedicated schedule
-    ///
-    /// Pre: _neuroSchedulable and _neuroSchedule must not be null
-    /// Post: Neuro is assigned to her schedule and is the only member
     /// </summary>
+    /// <pre>
+    /// <see cref="_neuroSchedulable"/> and <see cref="_neuroSchedule"/> both reference live game objects.
+    /// </pre>
+    /// <post>
+    /// The duplicant is unassigned from any previous schedule and assigned to the dedicated Neuro schedule.
+    /// </post>
     private void AssignNeuroToSchedule()
     {
         if (_neuroSchedulable == null || _neuroSchedule == null)
@@ -272,11 +387,14 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
 
     /// <summary>
     /// Removes a schedulable from their current schedule
-    ///
-    /// Pre: schedulable must not be null
-    /// Post: schedulable is no longer assigned to any schedule
     /// </summary>
     /// <param name="schedulable">The Schedulable to remove</param>
+    /// <pre>
+    /// <paramref name="schedulable"/> may currently be assigned to one or more schedule instances.
+    /// </pre>
+    /// <post>
+    /// The schedulable is no longer assigned to any schedule found in the schedule manager list.
+    /// </post>
     private void RemoveFromCurrentSchedule(Schedulable schedulable)
     {
         if (schedulable == null)
@@ -311,6 +429,12 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
     /// Gets Neuro's dedicated schedule instance
     /// </summary>
     /// <returns>Neuro's Schedule, or null if not created yet</returns>
+    /// <pre>
+    /// Initialization may still be pending or may not yet have produced a dedicated schedule.
+    /// </pre>
+    /// <post>
+    /// The current dedicated schedule reference is returned.
+    /// </post>
     public Schedule? GetNeuroSchedule()
     {
         return _neuroSchedule;
@@ -320,6 +444,12 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
     /// Gets Neuro's Schedulable component
     /// </summary>
     /// <returns>Neuro's Schedulable, or null if not found yet</returns>
+    /// <pre>
+    /// The configured duplicant may or may not have been found in the live colony list.
+    /// </pre>
+    /// <post>
+    /// The currently tracked schedulable reference is returned.
+    /// </post>
     public Schedulable? GetNeuroSchedulable()
     {
         return _neuroSchedulable;
@@ -327,11 +457,14 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
 
     /// <summary>
     /// Updates Neuro's schedule with a new schedule pattern
-    ///
-    /// Pre: newSchedule must be a valid Schedule with 24 hours of blocks
-    /// Post: Neuro's schedule is updated and she remains assigned
     /// </summary>
     /// <param name="newSchedule">The new schedule to apply</param>
+    /// <pre>
+    /// <paramref name="newSchedule"/> contains a valid 24-block template and the manager can resolve the dedicated schedule and duplicant.
+    /// </pre>
+    /// <post>
+    /// Neuro's dedicated schedule blocks mirror the supplied template while preserving registration and assignment.
+    /// </post>
     public void UpdateNeuroSchedule(Schedule newSchedule)
     {
         NeuroLogger.Log("========== UpdateNeuroSchedule START ==========", "NeuroScheduleManager");
@@ -533,8 +666,26 @@ public class NeuroScheduleManager : KMonoBehaviour, ISaveLoadable
     /// Public method to manually trigger finding and assigning Neuro
     /// Call this after Neuro spawns in the game
     /// </summary>
+    /// <pre>
+    /// The dedicated schedule already exists or can be resolved.
+    /// </pre>
+    /// <post>
+    /// The manager re-runs duplicant discovery and schedule assignment.
+    /// </post>
     public void RefreshNeuroAssignment()
     {
+        if (_neuroSchedule == null)
+        {
+            MinionIdentity? neuro = FindNeuroDuplicant();
+            Schedulable? schedulable = neuro?.GetComponent<Schedulable>();
+            Schedule? currentSchedule = schedulable?.GetSchedule();
+
+            if (neuro != null)
+            {
+                EnsureNeuroScheduleExists(currentSchedule);
+            }
+        }
+
         FindAndAssignNeuro();
     }
 }

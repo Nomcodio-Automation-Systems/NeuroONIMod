@@ -1,15 +1,35 @@
 using HarmonyLib;
+using NeuroMod.Integration;
 using NeuroSdk.Websocket;
 using System;
 
 namespace NeuroMod;
 
-public class Patches
+/// <summary>
+/// Core Harmony patches for NeuroMod initialization and duplicant spawn handling.
+/// Split into partial classes across files:
+///   - Patches.cs: Db.Initialize, Game.OnSpawn, MinionIdentity.OnSpawn
+///   - ActiveControllerPatches.cs: ActiveController state machine patches
+///   - ErrandPatches.cs: Chore precondition patches for errand locking
+/// </summary>
+/// <pre>Harmony patching is active during game startup and duplicant spawn lifecycles.</pre>
+/// <post>NeuroMod startup, manager bootstrap, and duplicant-specific integration hooks run at the intended game entry points.</post>
+public partial class Patches
 {
+    /// <summary>
+    /// Hooks database initialization to bootstrap NeuroMod systems.
+    /// </summary>
+    /// <pre>The ONI database initialization lifecycle is about to run.</pre>
+    /// <post>Configuration, SDK bootstrapping, and timeout-system initialization are integrated around the database lifecycle.</post>
     [HarmonyPatch(typeof(Db))]
     [HarmonyPatch("Initialize")]
     public class Db_Initialize_Patch
     {
+        /// <summary>
+        /// Loads configuration and initializes NeuroSdk before database initialization proceeds.
+        /// </summary>
+        /// <pre>Static game data has not finished initializing yet.</pre>
+        /// <post>Configuration has been loaded or defaulted and NeuroSdk startup has been attempted.</post>
         public static void Prefix()
         {
             Debug.Log("I execute before Db.Initialize!");
@@ -31,16 +51,19 @@ public class Patches
             NeuroLogger.Log("NeuroSdk initialization complete", "NeuroMod");
         }
 
+        /// <summary>
+        /// Finishes NeuroMod subsystem initialization after the game database is ready.
+        /// </summary>
+        /// <pre>The game database and related singleton registries are available.</pre>
+        /// <post>NeuroMod subsystems have been initialized or an initialization failure has been logged.</post>
         public static void Postfix()
         {
             Debug.Log("I execute after Db.Initialize!");
 
             try
             {
-                // Get configuration for initialization
                 ModConfig config = ConfigManager.Instance.Config;
 
-                // Initialize systems based on configuration
                 if (config.Game.ScheduleControlEnabled)
                 {
                     Debug.Log("[NeuroMod] Schedule control system loaded!");
@@ -51,10 +74,7 @@ public class Patches
                     Debug.Log("[NeuroMod] Bio data monitoring system loaded!");
                 }
 
-                // Initialize Neuro SDK with configured settings
                 InitializeNeuroSdk(config);
-
-                // Initialize timeout management
                 InitializeTimeoutManager(config);
 
                 Debug.Log("[NeuroMod] All systems initialized successfully!");
@@ -69,23 +89,21 @@ public class Patches
         }
 
         /// <summary>
-        /// Initializes Neuro SDK with configuration settings
+        /// Applies configuration-dependent Neuro SDK startup behavior.
         /// </summary>
+        /// <param name="config">The loaded mod configuration</param>
+        /// <pre><paramref name="config"/> contains the runtime settings selected for the mod.</pre>
+        /// <post>SDK-related initialization decisions have been logged and any available connection instance has been inspected.</post>
         private static void InitializeNeuroSdk(ModConfig config)
         {
             try
             {
                 Debug.Log("[NeuroMod] Initializing Neuro SDK system...");
 
-                // Initialize WebSocket connection with configured endpoint
                 if (WebsocketConnection.Instance != null)
                 {
                     Debug.Log("[NeuroMod] WebSocket connection instance found");
 
-                    // Note: WebsocketConnection doesn't expose ConfigureConnection method
-                    // Configuration should be handled through NeuroSdk initialization
-
-                    // Auto-connect functionality would be handled by the SDK
                     if (config.Neuro.AutoReconnect)
                     {
                         Debug.Log("[NeuroMod] Auto-reconnect enabled - handled by NeuroSdk");
@@ -101,15 +119,17 @@ public class Patches
         }
 
         /// <summary>
-        /// Initializes timeout management system
+        /// Applies configuration-dependent timeout manager startup behavior.
         /// </summary>
+        /// <param name="config">The loaded mod configuration</param>
+        /// <pre><paramref name="config"/> contains the runtime timeout settings selected for the mod.</pre>
+        /// <post>The timeout manager has been reset and the effective settings have been logged.</post>
         private static void InitializeTimeoutManager(ModConfig config)
         {
             try
             {
                 Debug.Log("[NeuroMod] Initializing timeout management system...");
 
-                // Reset any existing timeouts
                 TimeoutManager.Instance.ResetTimeoutCount();
 
                 Debug.Log($"[NeuroMod] Timeout settings - Global: {config.Timeout.GlobalTimeout}s, " +
@@ -126,13 +146,21 @@ public class Patches
     }
 
     /// <summary>
-    /// Patch to instantiate NeuroScheduleManager when the game spawns
-    /// OnSpawn is called after OnPrefabInit, ensuring all game systems are ready
+    /// Patch to instantiate NeuroScheduleManager when the game spawns.
+    /// OnSpawn is called after OnPrefabInit, ensuring all game systems are ready.
     /// </summary>
+    /// <pre>The main Game object is entering its spawn lifecycle.</pre>
+    /// <post>A NeuroScheduleManager component exists on the Game object and has been initialized when possible.</post>
     [HarmonyPatch(typeof(Game))]
     [HarmonyPatch("OnSpawn")]
     public class Game_OnSpawn_Patch
     {
+        /// <summary>
+        /// Ensures the Game object owns a NeuroScheduleManager component.
+        /// </summary>
+        /// <param name="__instance">The Game instance</param>
+        /// <pre><paramref name="__instance"/> is the spawned Game singleton.</pre>
+        /// <post>The Game object has a NeuroScheduleManager component or a failure has been logged.</post>
         public static void Postfix(Game __instance)
         {
             if (__instance == null || __instance.gameObject == null)
@@ -143,7 +171,6 @@ public class Patches
 
             NeuroLogger.Log("Game.OnSpawn - Setting up NeuroScheduleManager", "ONIMod");
 
-            // Check if manager already exists (prevent duplicates)
             NeuroScheduleManager existingManager = __instance.gameObject.GetComponent<NeuroScheduleManager>();
             if (existingManager == null)
             {
@@ -162,12 +189,21 @@ public class Patches
     }
 
     /// <summary>
-    /// Patch to ensure Neuro gets assigned to her schedule after minions spawn
+    /// Patch to ensure Neuro gets assigned to her schedule and ErrandMonitor after minions spawn.
+    /// Combines schedule assignment and ErrandMonitor attachment in a single patch.
     /// </summary>
+    /// <pre>MinionIdentity spawn events are firing for newly spawned duplicates.</pre>
+    /// <post>The configured Neuro duplicant receives schedule assignment refresh and ErrandMonitor attachment when identified.</post>
     [HarmonyPatch(typeof(MinionIdentity))]
     [HarmonyPatch("OnSpawn")]
     public class MinionIdentity_OnSpawn_Patch
     {
+        /// <summary>
+        /// Identifies the configured Neuro duplicant, attaches monitoring, and refreshes schedule assignment.
+        /// </summary>
+        /// <param name="__instance">The spawned MinionIdentity</param>
+        /// <pre><paramref name="__instance"/> is the duplicate whose spawn has just completed.</pre>
+        /// <post>If the duplicate matches the configured Neuro target, monitoring and schedule-refresh work has been scheduled.</post>
         public static void Postfix(MinionIdentity __instance)
         {
             try
@@ -181,15 +217,25 @@ public class Patches
                 // Get configured duplicant name - NO hardcoded defaults
                 if (ConfigManager.Instance?.Config?.Duplicant?.DefaultName == null)
                 {
-                    // Can't check without config, skip
                     return;
                 }
 
                 string configuredName = ConfigManager.Instance.Config.Duplicant.DefaultName;
 
-                if (__instance.GetProperName() == configuredName)
+                string minionName = __instance.GetProperName();
+                bool isNeuro = string.Equals(minionName, configuredName, StringComparison.OrdinalIgnoreCase) ||
+                               (configuredName.Length >= 4 && minionName.ToLower().Contains(configuredName.ToLower()));
+
+                if (isNeuro)
                 {
                     NeuroLogger.Log($"Configured duplicant '{configuredName}' spawned! Assigning to dedicated schedule...", "ONIMod");
+
+                    // Attach ErrandMonitor if not already present
+                    if (__instance.GetComponent<ErrandMonitor>() == null)
+                    {
+                        __instance.gameObject.AddComponent<ErrandMonitor>();
+                        NeuroLogger.Log($"Attached ErrandMonitor to Neuro duplicant: {minionName}", "ErrandPatch");
+                    }
 
                     // Wait a frame for all components to initialize, then assign
                     __instance.StartCoroutine(AssignNeuroToScheduleDelayed());
@@ -201,9 +247,14 @@ public class Patches
             }
         }
 
+        /// <summary>
+        /// Delays schedule assignment until the next frame so dependent components are ready.
+        /// </summary>
+        /// <returns>An enumerator that waits one frame before refreshing the Neuro assignment.</returns>
+        /// <pre>The configured Neuro duplicant has just spawned and the schedule manager may not yet be fully ready.</pre>
+        /// <post>After one frame, the Neuro schedule assignment has been refreshed when the manager is available.</post>
         private static System.Collections.IEnumerator AssignNeuroToScheduleDelayed()
         {
-            // Wait one frame to ensure all components are initialized
             yield return null;
 
             if (NeuroScheduleManager.Instance != null)
@@ -213,410 +264,6 @@ public class Patches
             else
             {
                 NeuroLogger.LogWarning("NeuroScheduleManager not found when trying to assign Neuro!", "ONIMod");
-            }
-        }
-
-        /// <summary>
-        /// Initializes Neuro SDK with configuration settings
-        /// </summary>
-        private static void InitializeNeuroSdk(ModConfig config)
-        {
-            try
-            {
-                Debug.Log("[NeuroMod] Initializing Neuro SDK system...");
-
-                // Initialize WebSocket connection with configured endpoint
-                if (WebsocketConnection.Instance != null)
-                {
-                    Debug.Log("[NeuroMod] WebSocket connection instance found");
-
-                    // Note: WebsocketConnection doesn't expose ConfigureConnection method
-                    // Configuration should be handled through NeuroSdk initialization
-
-                    // Auto-connect functionality would be handled by the SDK
-                    if (config.Neuro.AutoReconnect)
-                    {
-                        Debug.Log("[NeuroMod] Auto-reconnect enabled - handled by NeuroSdk");
-                    }
-                }
-
-                Debug.Log("[NeuroMod] Neuro SDK system ready for initialization!");
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[NeuroMod] Neuro SDK initialization failed: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Initializes timeout management system
-        /// </summary>
-        private static void InitializeTimeoutManager(ModConfig config)
-        {
-            try
-            {
-                Debug.Log("[NeuroMod] Initializing timeout management system...");
-
-                // Reset any existing timeouts
-                TimeoutManager.Instance.ResetTimeoutCount();
-
-                Debug.Log($"[NeuroMod] Timeout settings - Global: {config.Timeout.GlobalTimeout}s, " +
-                         $"Decision: {config.Timeout.DecisionTimeout}s, " +
-                         $"Action: {config.Timeout.ActionTimeout}s");
-
-                Debug.Log("[NeuroMod] Timeout management system ready!");
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[NeuroMod] Timeout manager initialization failed: {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Enhanced ActiveController patches with configuration integration
-    /// </summary>
-    [HarmonyPatch(typeof(ActiveController))]
-    public static class ActiveControllerPatches
-    {
-        /// <summary>
-        /// Patch to override the InitializeStates method
-        /// This is where the state machine behavior is defined
-        /// </summary>
-        [HarmonyPatch("InitializeStates")]
-        [HarmonyPrefix]
-        public static bool InitializeStates_Prefix(
-            ActiveController __instance,
-            out StateMachine.BaseState default_state)
-        {
-            // Your custom initialization logic here
-            default_state = __instance.off;
-
-            // Use configured behavior if available
-            ModConfig config = ConfigManager.Instance.Config;
-            if (config?.Game?.RealtimeDecisions == true)
-            {
-                CustomInitializeStatesWithNeuro(__instance);
-            }
-            else
-            {
-                CustomInitializeStates(__instance);
-            }
-
-            // Return false to skip the original method
-            return false;
-        }
-
-        /// <summary>
-        /// Custom initialization with Neuro integration and timeout handling
-        /// </summary>
-        private static void CustomInitializeStatesWithNeuro(ActiveController controller)
-        {
-            ModConfig config = ConfigManager.Instance.Config;
-
-            controller.off
-                .PlayAnim("off")
-                .EventTransition(GameHashes.ActiveChanged, controller.working_pre,
-                    (smi) => NeuroActiveCheck(smi));
-
-            controller.working_pre
-                .PlayAnim("working_pre")
-                .OnAnimQueueComplete(controller.working_loop);
-
-            controller.working_loop
-                .PlayAnim("working_loop", KAnim.PlayMode.Loop)
-                .EventTransition(GameHashes.ActiveChanged, controller.working_pst,
-                    (smi) => NeuroInactiveCheck(smi));
-
-            controller.working_pst
-                .PlayAnim("working_pst")
-                .OnAnimQueueComplete(controller.off);
-        }
-
-        /// <summary>
-        /// Standard initialization without Neuro integration
-        /// </summary>
-        private static void CustomInitializeStates(ActiveController controller)
-        {
-            // Define basic state machine behavior
-            controller.off
-                .PlayAnim("off")
-                .EventTransition(GameHashes.ActiveChanged, controller.working_pre,
-                    (smi) => StandardActiveCheck(smi));
-
-            controller.working_pre
-                .PlayAnim("working_pre")
-                .OnAnimQueueComplete(controller.working_loop);
-
-            controller.working_loop
-                .PlayAnim("working_loop")
-                .EventTransition(GameHashes.ActiveChanged, controller.working_pst,
-                    (smi) => !StandardActiveCheck(smi));
-
-            controller.working_pst
-                .PlayAnim("working_pst")
-                .OnAnimQueueComplete(controller.off);
-        }
-
-        /// <summary>
-        /// Standard active check without Neuro integration
-        /// </summary>
-        private static bool StandardActiveCheck(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Operational operational = smi.GetComponent<Operational>();
-            return operational != null && operational.IsActive;
-        }
-
-        /// <summary>
-        /// Enhanced active check with Neuro integration and timeout handling
-        /// </summary>
-        private static bool NeuroActiveCheck(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Operational operational = smi.GetComponent<Operational>();
-            if (operational == null)
-            {
-                return false;
-            }
-
-            bool defaultResult = operational.IsActive;
-
-            // Skip Neuro integration if in manual mode
-            if (TimeoutManager.Instance.IsManualModeActive)
-            {
-                return defaultResult;
-            }
-
-            try
-            {
-                // Use timeout manager for Neuro decision
-                System.Threading.Tasks.Task<bool> task = TimeoutManager.Instance.ExecuteWithTimeout(
-                    "decision",
-                    async () => await GetNeuroActiveDecision(smi, defaultResult),
-                    () => GetFallbackActiveDecision(smi, defaultResult)
-                );
-
-                // For synchronous context, we use the default or wait briefly
-                if (task.IsCompleted)
-                {
-                    return task.Result;
-                }
-                else
-                {
-                    // Return default immediately, Neuro decision will apply later
-                    return defaultResult;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"[ActiveController] Neuro active check failed: {ex.Message}");
-                return defaultResult;
-            }
-        }
-
-        /// <summary>
-        /// Gets Neuro's decision on whether the machine should be active
-        /// </summary>
-        private static async System.Threading.Tasks.Task<bool> GetNeuroActiveDecision(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi,
-            bool defaultResult)
-        {
-            if (WebsocketConnection.Instance?.IsConnected != true)
-            {
-                return defaultResult;
-            }
-
-            // Send decision request to Neuro
-            // This is where you'd integrate with your Neuro SDK
-            // For now, return default
-            await System.Threading.Tasks.Task.Delay(100); // Simulate async operation
-            return defaultResult;
-        }
-
-        /// <summary>
-        /// Fallback decision when Neuro times out or is unavailable
-        /// </summary>
-        private static bool GetFallbackActiveDecision(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi,
-            bool defaultResult)
-        {
-            ModConfig config = ConfigManager.Instance.Config;
-            string fallbackBehavior = config?.Duplicant?.FallbackBehavior ?? "idle";
-
-            Debug.Log($"[ActiveController] Using fallback behavior: {fallbackBehavior}");
-
-            return fallbackBehavior.ToLower() switch
-            {
-                "continue_task" => defaultResult,
-                "emergency_protocol" => false, // Stop all operations
-                "idle" => false, // Default to idle
-                _ => defaultResult
-            };
-        }
-
-        private static bool NeuroInactiveCheck(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Operational operational = smi.GetComponent<Operational>();
-            return operational == null || !operational.IsActive;
-        }
-    }
-
-    /// <summary>
-    /// Patches for ActiveController.Instance
-    /// </summary>
-    [HarmonyPatch(typeof(ActiveController.Instance))]
-    public static class ActiveControllerInstancePatches
-    {
-        /// <summary>
-        /// Patch the constructor if you need to modify instance creation
-        /// </summary>
-        [HarmonyPatch(MethodType.Constructor, [typeof(IStateMachineTarget), typeof(ActiveController.Def)])]
-        [HarmonyPostfix]
-        public static void Constructor_Postfix(
-            ActiveController.Instance __instance,
-            IStateMachineTarget master,
-            ActiveController.Def def)
-        {
-            // Custom initialization for instances
-            Debug.Log($"[ActiveController.Instance] Created instance for {master.name}");
-
-            // Add custom components or setup here
-            CustomInstanceSetup(__instance, master, def);
-        }
-
-        private static void CustomInstanceSetup(
-            ActiveController.Instance instance,
-            IStateMachineTarget master,
-            ActiveController.Def def)
-        {
-            // Your custom instance setup logic
-            UnityEngine.GameObject gameObject = master.gameObject;
-
-            // Example: Add custom components
-            // if (gameObject.GetComponent<YourCustomComponent>() == null)
-            // {
-            //     gameObject.AddComponent<YourCustomComponent>();
-            // }
-
-            // Example: Subscribe to custom events
-            // instance.Subscribe(-1, OnCustomEvent);
-        }
-    }
-
-    /// <summary>
-    /// Advanced patches for additional state behavior
-    /// </summary>
-    [HarmonyPatch(typeof(ActiveController))]
-    public static class ActiveControllerAdvancedPatches
-    {
-        /// <summary>
-        /// Intercept state transitions to add custom behavior
-        /// </summary>
-        [HarmonyPatch("InitializeStates")]
-        [HarmonyPostfix]
-        public static void InitializeStates_Postfix(ActiveController __instance)
-        {
-            // Add custom behavior to existing states
-            AddCustomStateHandlers(__instance);
-        }
-
-        private static void AddCustomStateHandlers(ActiveController controller)
-        {
-            // Add custom enter/exit behaviors to states
-            controller.off
-                .Enter((smi) => OnEnterOffState(smi))
-                .Exit((smi) => OnExitOffState(smi));
-
-            controller.working_pre
-                .Enter((smi) => OnEnterWorkingPreState(smi))
-                .Exit((smi) => OnExitWorkingPreState(smi));
-
-            controller.working_loop
-                .Enter((smi) => OnEnterWorkingLoopState(smi))
-                .Exit((smi) => OnExitWorkingLoopState(smi))
-                .Update((smi, dt) => OnUpdateWorkingLoopState(smi, dt), UpdateRate.SIM_200ms);
-
-            controller.working_pst
-                .Enter((smi) => OnEnterWorkingPstState(smi))
-                .Exit((smi) => OnExitWorkingPstState(smi));
-        }
-
-        private static void OnEnterOffState(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Debug.Log($"[ActiveController] {GetTargetName(smi)} entered OFF state");
-            // Your custom logic when entering off state
-        }
-
-        private static void OnExitOffState(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Debug.Log($"[ActiveController] {GetTargetName(smi)} exited OFF state");
-            // Your custom logic when exiting off state
-        }
-
-        private static void OnEnterWorkingPreState(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Debug.Log($"[ActiveController] {GetTargetName(smi)} entered WORKING_PRE state");
-            // Your custom logic when starting work preparation
-        }
-
-        private static void OnExitWorkingPreState(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Debug.Log($"[ActiveController] {GetTargetName(smi)} exited WORKING_PRE state");
-            // Your custom logic when finishing work preparation
-        }
-
-        private static void OnEnterWorkingLoopState(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Debug.Log($"[ActiveController] {GetTargetName(smi)} entered WORKING_LOOP state");
-            // Your custom logic when starting main work loop
-        }
-
-        private static void OnUpdateWorkingLoopState(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi,
-            float dt)
-        {
-            // Your custom logic that runs every 200ms during working loop
-            // Example: Check custom conditions, modify behavior, etc.
-        }
-
-        private static void OnExitWorkingLoopState(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Debug.Log($"[ActiveController] {GetTargetName(smi)} exited WORKING_LOOP state");
-            // Your custom logic when stopping main work loop
-        }
-
-        private static void OnEnterWorkingPstState(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Debug.Log($"[ActiveController] {GetTargetName(smi)} entered WORKING_PST state");
-            // Your custom logic when starting work cleanup
-        }
-
-        private static void OnExitWorkingPstState(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            Debug.Log($"[ActiveController] {GetTargetName(smi)} exited WORKING_PST state");
-            // Your custom logic when finishing work cleanup
-        }
-
-        private static string GetTargetName(
-            GameStateMachine<ActiveController, ActiveController.Instance, IStateMachineTarget, object>.Instance smi)
-        {
-            try
-            {
-                return smi.gameObject?.name ?? "Unknown";
-            }
-            catch
-            {
-                return "Unknown";
             }
         }
     }

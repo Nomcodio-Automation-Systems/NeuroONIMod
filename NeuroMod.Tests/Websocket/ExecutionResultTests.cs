@@ -8,7 +8,6 @@ namespace NeuroMod.Tests.Websocket;
 /// Tests for the ExecutionResult class
 /// Tests result creation, properties, and factory methods
 /// </summary>
-[TestFixture]
 public class ExecutionResultTests
 {
     /// <summary>

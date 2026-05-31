@@ -9,7 +9,6 @@ namespace NeuroMod.Tests.Messages;
 /// Tests for the MessageJData struct
 /// Tests creation, properties, and data handling
 /// </summary>
-[TestFixture]
 public class MessageJDataTests
 {
     /// <summary>

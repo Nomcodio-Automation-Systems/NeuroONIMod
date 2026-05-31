@@ -1,8 +1,10 @@
-﻿#nullable enable
+#nullable enable
 
 using JetBrains.Annotations;
 using NeuroSdk.Messages.Outgoing;
 using NeuroSdk.Websocket;
+using NeuroMod.Api;
+using NeuroMod;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,97 +14,188 @@ using UnityEngine;
 namespace NeuroSdk.Actions;
 
 [PublicAPI]
+/// <summary>
+/// Provides registration and lifecycle coordination for Neuro actions.
+/// </summary>
+/// <pre>Actions are registered through the shared registration manager and may be resent or unregistered as the SDK lifecycle changes.</pre>
+/// <post>Callers can query action registration state and coordinate registration cleanup through the static API surface.</post>
 public sealed class NeuroActionHandler : MonoBehaviour
 {
-    private static List<INeuroAction> _currentlyRegisteredActions = [];
-    private static readonly List<INeuroAction> _dyingActions = [];
+    private const string TAG = "NeuroActionHandler";
 
+    /// <summary>
+    /// Gets a registered action by name.
+    /// </summary>
+    /// <param name="name">The action name to look up.</param>
+    /// <returns>The registered action, or <see langword="null"/> when not found.</returns>
+    /// <pre><paramref name="name"/> identifies an action that may have been registered previously.</pre>
+    /// <post>The corresponding registered action is returned when available.</post>
     public static INeuroAction? GetRegistered(string name)
     {
-        return _currentlyRegisteredActions.FirstOrDefault(a => a.Name == name);
+        return RegistrationManager.GetRegistered(name);
     }
 
+    /// <summary>
+    /// Determines whether an action name was recently unregistered.
+    /// </summary>
+    /// <param name="name">The action name to inspect.</param>
+    /// <returns><see langword="true"/> when the action was recently unregistered; otherwise, <see langword="false"/>.</returns>
+    /// <pre><paramref name="name"/> identifies an action name to check against recent unregister history.</pre>
+    /// <post>The method reports whether the name is tracked as recently unregistered.</post>
     public static bool IsRecentlyUnregistered(string name)
     {
-        return _dyingActions.Any(a => a.Name == name);
+        return RegistrationManager.IsRecentlyUnregistered(name);
     }
 
     private void OnApplicationQuit()
     {
-        // Only send if WebSocket connection is available
-        WebsocketConnection.Instance?.SendImmediate(new ActionsUnregister(_currentlyRegisteredActions));
-        _currentlyRegisteredActions = null!;
+        try
+        {
+            var all = RegistrationManager.GetAllRegistered();
+            NeuroMod.Integration.Api.ApiClient.SendImmediate(new ActionsUnregister(all));
+        }
+        catch (Exception ex)
+        {
+            NeuroLogger.LogException(ex, "NeuroActionHandler.OnApplicationQuit", "NeuroActionHandler");
+        }
     }
 
+    /// <summary>
+    /// Registers a collection of actions.
+    /// </summary>
+    /// <param name="newActions">The actions to register.</param>
+    /// <pre><paramref name="newActions"/> contains the actions that should be made available to the SDK.</pre>
+    /// <post>The supplied actions are forwarded to the registration manager and become registered when successful.</post>
     public static void RegisterActions(IReadOnlyCollection<INeuroAction> newActions)
     {
-        // Log what we're trying to register
-        Debug.Log($"[NeuroActionHandler] Registering {newActions.Count} actions: {string.Join(", ", newActions.Select(a => a.Name))}");
-
-        // Remove any existing actions with the same names
-        List<INeuroAction> existingActionsToRemove = _currentlyRegisteredActions.Where(oldAction =>
-            newActions.Any(newAction => oldAction.Name == newAction.Name)).ToList();
-
-        if (existingActionsToRemove.Any())
+        try
         {
-            Debug.Log($"[NeuroActionHandler] Removing {existingActionsToRemove.Count} existing actions: {string.Join(", ", existingActionsToRemove.Select(a => a.Name))}");
-            _currentlyRegisteredActions.RemoveAll(existingActionsToRemove.Contains);
+            NeuroLogger.Log($"Registering {newActions.Count} actions", TAG);
+            RegistrationManager.RegisterActions(newActions);
         }
-
-        _dyingActions.RemoveAll(oldAction => newActions.Any(newAction => oldAction.Name == newAction.Name));
-
-        // Add the new actions
-        _currentlyRegisteredActions.AddRange(newActions);
-
-        Debug.Log($"[NeuroActionHandler] Total registered actions: {_currentlyRegisteredActions.Count}");
-
-        // Only send to WebSocket if connection is available
-        WebsocketConnection.Instance?.Send(new ActionsRegister(newActions));
+        catch (Exception ex)
+        {
+            NeuroLogger.LogException(ex, "RegisterActions", TAG);
+            throw;
+        }
     }
 
+    /// <summary>
+    /// Registers a parameter array of actions.
+    /// </summary>
+    /// <param name="newActions">The actions to register.</param>
+    /// <pre><paramref name="newActions"/> contains the actions that should be made available to the SDK.</pre>
+    /// <post>The supplied actions are forwarded to the registration manager and become registered when successful.</post>
     public static void RegisterActions(params INeuroAction[] newActions)
     {
-        RegisterActions((IReadOnlyCollection<INeuroAction>)newActions);
-    }
-
-    public static void UnregisterActions(IEnumerable<string> removeActionsList)
-    {
-        INeuroAction[] actionsToRemove = [.. _currentlyRegisteredActions.Where(oldAction => removeActionsList.Any(removeAction => oldAction.Name == removeAction))];
-
-        _currentlyRegisteredActions.RemoveAll(actionsToRemove.Contains);
-        _dyingActions.AddRange(actionsToRemove);
-        _ = Task.Run(async () => await removeActions());
-
-        // Only send if WebSocket connection is available
-        WebsocketConnection.Instance?.Send(new ActionsUnregister(removeActionsList));
-
-        return;
-
-        async Task removeActions()
+        try
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(10000));
-            _dyingActions.RemoveAll(actionsToRemove.Contains);
+            NeuroLogger.Log($"Registering {newActions.Length} actions (params)", TAG);
+            RegistrationManager.RegisterActions(newActions);
+        }
+        catch (Exception ex)
+        {
+            NeuroLogger.LogException(ex, "RegisterActions(params)", TAG);
+            throw;
         }
     }
 
+    /// <summary>
+    /// Unregisters actions by name.
+    /// </summary>
+    /// <param name="removeActionsList">The action names to unregister.</param>
+    /// <pre><paramref name="removeActionsList"/> identifies registered action names to remove.</pre>
+    /// <post>The named actions are forwarded to the registration manager for removal.</post>
+    public static void UnregisterActions(IEnumerable<string> removeActionsList)
+    {
+        try
+        {
+            NeuroLogger.Log($"Unregistering {removeActionsList.Count()} actions", TAG);
+            RegistrationManager.UnregisterActions(removeActionsList);
+        }
+        catch (Exception ex)
+        {
+            NeuroLogger.LogException(ex, "UnregisterActions(IEnumerable<string>)", TAG);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Unregisters actions by instance.
+    /// </summary>
+    /// <param name="removeActionsList">The actions to unregister.</param>
+    /// <pre><paramref name="removeActionsList"/> contains registered action instances to remove.</pre>
+    /// <post>The supplied actions are forwarded to the registration manager for removal.</post>
     public static void UnregisterActions(IEnumerable<INeuroAction> removeActionsList)
     {
-        UnregisterActions(removeActionsList.Select(a => a.Name));
+        try
+        {
+            NeuroLogger.Log($"Unregistering {removeActionsList.Count()} actions (INeuroAction list)", TAG);
+            RegistrationManager.UnregisterActions(removeActionsList);
+        }
+        catch (Exception ex)
+        {
+            NeuroLogger.LogException(ex, "UnregisterActions(IEnumerable<INeuroAction>)", TAG);
+            throw;
+        }
     }
 
+    /// <summary>
+    /// Unregisters a parameter array of actions.
+    /// </summary>
+    /// <param name="removeActionsList">The actions to unregister.</param>
+    /// <pre><paramref name="removeActionsList"/> contains registered action instances to remove.</pre>
+    /// <post>The supplied actions are forwarded to the registration manager for removal.</post>
     public static void UnregisterActions(params INeuroAction[] removeActionsList)
     {
-        UnregisterActions((IReadOnlyCollection<INeuroAction>)removeActionsList);
+        try
+        {
+            NeuroLogger.Log($"Unregistering {removeActionsList.Length} actions (params)", TAG);
+            RegistrationManager.UnregisterActions(removeActionsList);
+        }
+        catch (Exception ex)
+        {
+            NeuroLogger.LogException(ex, "UnregisterActions(params INeuroAction[])", TAG);
+            throw;
+        }
     }
 
+    /// <summary>
+    /// Unregisters a parameter array of action names.
+    /// </summary>
+    /// <param name="removeActionNamesList">The action names to unregister.</param>
+    /// <pre><paramref name="removeActionNamesList"/> identifies registered action names to remove.</pre>
+    /// <post>The named actions are forwarded to the registration manager for removal.</post>
     public static void UnregisterActions(params string[] removeActionNamesList)
     {
-        UnregisterActions((IReadOnlyCollection<string>)removeActionNamesList);
+        try
+        {
+            NeuroLogger.Log($"Unregistering {removeActionNamesList.Length} actions (params string[])", TAG);
+            RegistrationManager.UnregisterActions(removeActionNamesList);
+        }
+        catch (Exception ex)
+        {
+            NeuroLogger.LogException(ex, "UnregisterActions(params string[])", TAG);
+            throw;
+        }
     }
 
+    /// <summary>
+    /// Resends all currently registered actions to the remote endpoint.
+    /// </summary>
+    /// <pre>The registration manager currently holds action registrations that should be re-announced.</pre>
+    /// <post>All tracked registrations are resent through the registration manager.</post>
     public static void ResendRegisteredActions()
     {
-        // Only send if WebSocket connection is available
-        WebsocketConnection.Instance?.Send(new ActionsRegister(_currentlyRegisteredActions));
+        try
+        {
+            NeuroLogger.Log("Resending registered actions", TAG);
+            RegistrationManager.ResendRegisteredActions();
+        }
+        catch (Exception ex)
+        {
+            NeuroLogger.LogException(ex, "ResendRegisteredActions", TAG);
+            throw;
+        }
     }
 }

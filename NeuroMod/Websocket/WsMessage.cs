@@ -8,6 +8,12 @@ namespace NeuroSdk.Websocket;
 /// <summary>
 /// Represents a WebSocket message sent to the Neuro SDK server
 /// </summary>
+/// <pre>
+/// The command, game, and optional data payload already conform to the outbound websocket protocol.
+/// </pre>
+/// <post>
+/// Instances can be serialized as stable websocket payloads for outbound SDK communication.
+/// </post>
 /// <remarks>
 /// Initializes a new instance of the WsMessage class
 /// </remarks>
@@ -39,6 +45,12 @@ public class WsMessage(string command, object? data, string game)
     /// </summary>
     /// <param name="obj">The object to compare with the current object</param>
     /// <returns>True if the specified object is equal to the current object; otherwise, false</returns>
+    /// <pre>
+    /// <paramref name="obj"/> may or may not be another websocket message instance.
+    /// </pre>
+    /// <post>
+    /// The method reports value equality across command, game, and data payload.
+    /// </post>
     public override bool Equals(object? obj)
     {
         return obj is not WsMessage other
@@ -52,6 +64,12 @@ public class WsMessage(string command, object? data, string game)
     /// Serves as the default hash function
     /// </summary>
     /// <returns>A hash code for the current object</returns>
+    /// <pre>
+    /// The websocket message has immutable command, game, and data fields.
+    /// </pre>
+    /// <post>
+    /// A hash code consistent with <see cref="Equals(object?)"/> is returned.
+    /// </post>
     public override int GetHashCode()
     {
         unchecked
@@ -68,6 +86,12 @@ public class WsMessage(string command, object? data, string game)
     /// Returns a string that represents the current object
     /// </summary>
     /// <returns>A string that represents the current object</returns>
+    /// <pre>
+    /// The message fields have already been initialized.
+    /// </pre>
+    /// <post>
+    /// A diagnostic string representation of the websocket message is returned.
+    /// </post>
     public override string ToString()
     {
         return $"WsMessage {{ Command = {Command}, Game = {Game}, Data = {Data} }}";

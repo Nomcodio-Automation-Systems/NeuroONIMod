@@ -4,9 +4,14 @@ using JetBrains.Annotations;
 using NeuroSdk.Messages.Outgoing;
 using NeuroSdk.Websocket;
 using System;
+using System.Diagnostics;
+using NeuroMod;
+using NeuroMod.Architecture;
+using NeuroMod.Architecture.Events;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using NeuroMod.Integration.Api;
 
 namespace NeuroSdk.Actions;
 
@@ -14,6 +19,8 @@ namespace NeuroSdk.Actions;
 /// A wrapper class around the concept of an action window, which handles sending context,
 /// registering actions, forcing actions and unregistering the actions afterwards.
 /// </summary>
+/// <pre>Callers create the component through <see cref="Create(UnityEngine.GameObject)"/> and configure it during the building phase.</pre>
+/// <post>The action window owns a consistent lifecycle for context, action registration, forcing, results, and cleanup.</post>
 /// <remarks>
 /// This class follows the builder pattern and provides a fluent API for configuring action windows.
 /// It automatically manages the lifecycle of actions and ensures proper cleanup when destroyed.
@@ -32,6 +39,36 @@ namespace NeuroSdk.Actions;
 [PublicAPI]
 public sealed partial class ActionWindow : MonoBehaviour
 {
+    // Unique id for this window instance used to correlate logs
+    private Guid _windowId;
+
+    private string FormatLog(string message) => $"[Window:{_windowId}] {message}";
+
+    private void LogInfo(string message) => NeuroLogger.Log(FormatLog(message), "ActionWindow", _windowId.ToString());
+    private void LogWarn(string message) => NeuroLogger.LogWarning(FormatLog(message), "ActionWindow", _windowId.ToString());
+    private void LogError(string message) => NeuroLogger.LogError(FormatLog(message), "ActionWindow", _windowId.ToString());
+    private void LogDebug(string message) => NeuroLogger.LogDebug(FormatLog(message), "ActionWindow", _windowId.ToString());
+    /// <summary>
+    /// Separable API client used for sending context messages.
+    /// </summary>
+    /// <pre>The configured API facade is available.</pre>
+    /// <post>The returned client is the current transport abstraction used by this action window.</post>
+    private IApiClient Api => ApiClient.Instance;
+
+    /// <summary>
+    /// Event aggregator for decoupled publish/subscribe.
+    /// Can be injected by a DI framework or will fall back to a singleton.
+    /// </summary>
+    /// <pre>The action window can publish lifecycle events through the configured event aggregator.</pre>
+    /// <post>The property returns the current event aggregator used by this window.</post>
+    public IEventAggregator EventAggregator { get; set; } = NeuroMod.Architecture.EventAggregator.Instance;
+
+    /// <summary>
+    /// Command manager (singleton helper). Use `CommandManager.Instance` or inject a custom one.
+    /// </summary>
+    /// <pre>The architecture command manager singleton is available.</pre>
+    /// <post>The property returns the command manager used for command-based action-window operations.</post>
+    public CommandManager CommandManager => NeuroMod.Architecture.CommandManager.Instance;
     #region Constants
 
     private const string ERROR_INCORRECT_CREATION = "ActionWindow should be created using Create method. This ActionWindow was either created with AddComponent or with Instantiate.";
@@ -53,11 +90,13 @@ public sealed partial class ActionWindow : MonoBehaviour
     private static bool _isCreatedCorrectly = false;
 
     /// <summary>
-    /// Creates a new ActionWindow. If the parent is destroyed, this ActionWindow will be automatically ended.
+    /// Creates a new action window attached to the supplied parent GameObject.
     /// </summary>
     /// <param name="parent">The parent GameObject for this ActionWindow</param>
     /// <returns>A new ActionWindow instance</returns>
     /// <exception cref="ArgumentNullException">Thrown when parent is null</exception>
+    /// <pre><paramref name="parent"/> references a live GameObject that will own the created component.</pre>
+    /// <post>A new <see cref="ActionWindow"/> component is attached to the parent and begins in the <see cref="State.Building"/> state.</post>
     /// <example>
     /// <code>
     /// var window = ActionWindow.Create(gameObject);
@@ -68,7 +107,7 @@ public sealed partial class ActionWindow : MonoBehaviour
         if (parent == null)
         {
             string error = "Parent GameObject cannot be null";
-            Debug.LogError($"{LOG_PREFIX} {error}");
+            NeuroLogger.LogError($"{LOG_PREFIX} {error}", "ActionWindow");
             throw new ArgumentNullException(nameof(parent), error);
         }
 
@@ -76,12 +115,14 @@ public sealed partial class ActionWindow : MonoBehaviour
         {
             _isCreatedCorrectly = true;
             ActionWindow actionWindow = parent.AddComponent<ActionWindow>();
-            Debug.Log($"{LOG_PREFIX} Created new ActionWindow on '{parent.name}'");
+            // assign id in Awake; log creation now with temp id
+            NeuroLogger.Log($"{LOG_PREFIX} Created new ActionWindow on '{parent.name}'", "ActionWindow");
             return actionWindow;
         }
         catch (Exception ex)
         {
-            Debug.LogError($"{LOG_PREFIX} Failed to create ActionWindow: {ex.Message}");
+            NeuroLogger.LogError($"Failed to create ActionWindow: {ex.Message}", "ActionWindow");
+            NeuroLogger.LogException(ex, "ActionWindow.Create", "ActionWindow");
             throw;
         }
         finally
@@ -93,16 +134,20 @@ public sealed partial class ActionWindow : MonoBehaviour
     /// <summary>
     /// Unity Awake method - validates proper creation and initializes the component
     /// </summary>
+    /// <pre>The component has just been attached and creation must have been mediated through <see cref="Create(UnityEngine.GameObject)"/>.</pre>
+    /// <post>The window either initializes its trace id successfully or destroys itself when created incorrectly.</post>
     private void Awake()
     {
         if (!_isCreatedCorrectly)
         {
-            Debug.LogError($"{LOG_PREFIX} {ERROR_INCORRECT_CREATION}");
+            NeuroLogger.LogError($"{LOG_PREFIX} {ERROR_INCORRECT_CREATION}", "ActionWindow");
             Destroy(this);
             return;
         }
 
-        Debug.Log($"{LOG_PREFIX} ActionWindow component initialized on '{gameObject.name}'");
+        // Initialize instance id and log
+        _windowId = Guid.NewGuid();
+            NeuroLogger.Log($"{LOG_PREFIX} ActionWindow component initialized on '{gameObject.name}'", "ActionWindow", _windowId.ToString());
     }
 
     #endregion Creation
@@ -110,8 +155,10 @@ public sealed partial class ActionWindow : MonoBehaviour
     #region State Management
 
     /// <summary>
-    /// Represents the current state of the ActionWindow lifecycle
+    /// Represents the current state of the ActionWindow lifecycle.
     /// </summary>
+    /// <pre>The action window transitions monotonically through its lifecycle states.</pre>
+    /// <post>Each enum value denotes a distinct lifecycle phase used to gate valid operations.</post>
     public enum State
     {
         /// <summary>Actions are being added to the window (mutable state)</summary>
@@ -128,29 +175,45 @@ public sealed partial class ActionWindow : MonoBehaviour
     }
 
     /// <summary>
-    /// Gets the current state of this ActionWindow
+    /// Gets the current lifecycle state of this action window.
     /// </summary>
+    /// <pre>No input is required.</pre>
+    /// <post>The returned state matches the window's current lifecycle phase.</post>
     public State CurrentState { get; private set; } = State.Building;
 
     /// <summary>
-    /// Gets the number of actions currently in this window
+    /// Gets the number of actions currently in this window.
     /// </summary>
+    /// <pre>No input is required.</pre>
+    /// <post>The returned count matches the current number of actions owned by the window.</post>
     public int ActionCount => _actions.Count;
 
     /// <summary>
-    /// Gets a read-only collection of action names in this window
+    /// Gets the trace identifier for this ActionWindow instance as a string.
+    /// This is intended for correlating logs across the system.
     /// </summary>
+    /// <pre>The window has completed initialization and has a trace identifier.</pre>
+    /// <post>The returned string identifies this action window instance for diagnostics.</post>
+    public string TraceId => _windowId.ToString();
+
+    /// <summary>
+    /// Gets a read-only collection of action names in this window.
+    /// </summary>
+    /// <pre>No input is required.</pre>
+    /// <post>The returned collection snapshots the action names currently owned by the window.</post>
     public IReadOnlyList<string> ActionNames => _actions.Select(a => a.Name).ToList().AsReadOnly();
 
     /// <summary>
     /// Validates that the ActionWindow is still in the building state and can be mutated
     /// </summary>
     /// <returns>True if the window can be mutated, false otherwise</returns>
+    /// <pre>The window may be in any lifecycle state.</pre>
+    /// <post>The returned value indicates whether mutation is currently allowed under the lifecycle rules.</post>
     private bool ValidateFrozen()
     {
         if (CurrentState != State.Building)
         {
-            Debug.LogError($"{LOG_PREFIX} {ERROR_MUTATE_AFTER_REGISTER}");
+            LogError(ERROR_MUTATE_AFTER_REGISTER);
             return false;
         }
         return true;
@@ -161,6 +224,8 @@ public sealed partial class ActionWindow : MonoBehaviour
     /// This transitions the window from Building to Registered state.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown when the window is not in Building state or has no actions</exception>
+    /// <pre>The window is in the <see cref="State.Building"/> state and contains at least one action.</pre>
+    /// <post>The configured actions are registered, the optional context is sent, and the window transitions to <see cref="State.Registered"/>.</post>
     /// <example>
     /// <code>
     /// window.AddAction(new MoveAction())
@@ -173,38 +238,44 @@ public sealed partial class ActionWindow : MonoBehaviour
         if (CurrentState != State.Building)
         {
             string error = ERROR_MULTIPLE_REGISTER;
-            Debug.LogError($"{LOG_PREFIX} {error}");
+            LogError(error);
             throw new InvalidOperationException(error);
         }
 
         if (_actions.Count == 0)
         {
             string error = ERROR_NO_ACTIONS;
-            Debug.LogError($"{LOG_PREFIX} {error}");
+            LogError(error);
             throw new InvalidOperationException(error);
         }
 
+        Stopwatch sw = Stopwatch.StartNew();
         try
         {
-            Debug.Log($"{LOG_PREFIX} Registering window with {_actions.Count} actions");
+            LogInfo($"Registering window with {_actions.Count} actions (prevState={CurrentState})");
 
             // Send context message if set
             if (!string.IsNullOrEmpty(_contextMessage))
             {
-                Context.Send(_contextMessage!, _contextSilent ?? false);
-                Debug.Log($"{LOG_PREFIX} Sent context message: '{_contextMessage}' (Silent: {_contextSilent ?? false})");
+                Api.SendContext(_contextMessage!, _contextSilent ?? false);
+                LogInfo($"Sent context message: '{_contextMessage}' (Silent: {_contextSilent ?? false})");
             }
 
             // Register actions with the handler
             NeuroActionHandler.RegisterActions(_actions);
+            State prev = CurrentState;
             CurrentState = State.Registered;
-
-            Debug.Log($"{LOG_PREFIX} Successfully registered {_actions.Count} actions: [{string.Join(", ", ActionNames)}]");
+            LogInfo($"State transition: {prev} -> {CurrentState}; Registered {_actions.Count} actions: [{string.Join(", ", ActionNames)}]; duration={sw.ElapsedMilliseconds}ms");
+            try
+            {
+                EventAggregator?.Publish(new WindowRegisteredEvent(TraceId, ActionNames));
+            }
+            catch { }
         }
         catch (Exception ex)
         {
-            Debug.LogError($"{LOG_PREFIX} Failed to register actions: {ex.Message}");
-            Debug.LogException(ex);
+            LogError($"Failed to register actions: {ex.Message}");
+            NeuroLogger.LogException(ex, "ActionWindow.Register", "ActionWindow", _windowId.ToString());
             throw;
         }
     }
@@ -224,6 +295,8 @@ public sealed partial class ActionWindow : MonoBehaviour
     /// <param name="silent">Whether the message should be sent silently (not visible to user)</param>
     /// <returns>The <see cref="ActionWindow"/> itself for method chaining</returns>
     /// <exception cref="ArgumentException">Thrown when message is null, empty, or whitespace</exception>
+    /// <pre>The window is still mutable and <paramref name="message"/> contains a non-empty context string.</pre>
+    /// <post>The context message and silent flag are stored for use during registration.</post>
     /// <example>
     /// <code>
     /// window.SetContext("The player is in combat and needs to choose an action", false);
@@ -234,7 +307,7 @@ public sealed partial class ActionWindow : MonoBehaviour
         if (string.IsNullOrWhiteSpace(message))
         {
             string error = "Context message cannot be null, empty, or whitespace";
-            Debug.LogError($"{LOG_PREFIX} {error}");
+            LogError(error);
             throw new ArgumentException(error, nameof(message));
         }
 
@@ -245,7 +318,7 @@ public sealed partial class ActionWindow : MonoBehaviour
 
         _contextMessage = message;
         _contextSilent = silent;
-        Debug.Log($"{LOG_PREFIX} Set context message: '{message}' (Silent: {silent})");
+        LogInfo($"Set context message: '{message}' (Silent: {silent})");
         return this;
     }
 
@@ -253,7 +326,7 @@ public sealed partial class ActionWindow : MonoBehaviour
 
     #region Action Management
 
-    private readonly List<INeuroAction> _actions = [];
+    private readonly List<INeuroAction> _actions = new List<INeuroAction>();
 
     /// <summary>
     /// Add a new action to the list of possible actions that Neuro can pick from.
@@ -263,6 +336,8 @@ public sealed partial class ActionWindow : MonoBehaviour
     /// <returns>The <see cref="ActionWindow"/> itself for method chaining</returns>
     /// <exception cref="ArgumentNullException">Thrown when action is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when action is already in another window or has duplicate name</exception>
+    /// <pre>The window is in the <see cref="State.Building"/> state and the action is either detached or already owned by this window.</pre>
+    /// <post>The action is associated with this window and added to the action list when accepted.</post>
     /// <example>
     /// <code>
     /// window.AddAction(new MoveAction("move_forward", "Move the character forward"))
@@ -274,7 +349,7 @@ public sealed partial class ActionWindow : MonoBehaviour
         if (action == null)
         {
             string error = "Action cannot be null";
-            Debug.LogError($"{LOG_PREFIX} {error}");
+            LogError(error);
             throw new ArgumentNullException(nameof(action), error);
         }
 
@@ -289,17 +364,17 @@ public sealed partial class ActionWindow : MonoBehaviour
             if (action.ActionWindow != this)
             {
                 string errorMsg = string.Format(ERROR_ACTION_IN_OTHER_WINDOW, action.Name);
-                Debug.LogError($"{LOG_PREFIX} {errorMsg}");
+                LogError(errorMsg);
                 throw new InvalidOperationException(errorMsg);
             }
-            Debug.LogWarning($"{LOG_PREFIX} Action '{action.Name}' is already in this window");
+            LogWarn($"Action '{action.Name}' is already in this window");
             return this; // Already in this window
         }
 
         // Check if action can be added to this window
         if (!action.CanAddToActionWindow(this))
         {
-            Debug.LogWarning($"{LOG_PREFIX} Action '{action.Name}' cannot be added to this window (CanAddToActionWindow returned false)");
+            LogWarn($"Action '{action.Name}' cannot be added to this window (CanAddToActionWindow returned false)");
             return this;
         }
 
@@ -307,7 +382,7 @@ public sealed partial class ActionWindow : MonoBehaviour
         if (_actions.Any(a => a.Name == action.Name))
         {
             string errorMsg = string.Format(ERROR_DUPLICATE_ACTION, action.Name);
-            Debug.LogError($"{LOG_PREFIX} {errorMsg}");
+            LogError(errorMsg);
             throw new InvalidOperationException(errorMsg);
         }
 
@@ -315,12 +390,17 @@ public sealed partial class ActionWindow : MonoBehaviour
         {
             action.SetActionWindow(this);
             _actions.Add(action);
-            Debug.Log($"{LOG_PREFIX} Added action '{action.Name}' to window (Total: {_actions.Count})");
+                LogInfo($"Added action '{action.Name}' to window (Total: {_actions.Count})");
+                try
+                {
+                    EventAggregator?.Publish(new ActionAddedEvent(TraceId, action.Name));
+                }
+                catch { }
         }
         catch (Exception ex)
         {
-            Debug.LogError($"{LOG_PREFIX} Failed to add action '{action.Name}': {ex.Message}");
-            Debug.LogException(ex);
+            LogError($"Failed to add action '{action.Name}': {ex.Message}");
+            NeuroLogger.LogException(ex, "ActionWindow.AddAction", "ActionWindow", _windowId.ToString());
             throw;
         }
 
@@ -333,6 +413,8 @@ public sealed partial class ActionWindow : MonoBehaviour
     /// </summary>
     /// <param name="actionName">The name of the action to remove</param>
     /// <returns>True if the action was found and removed, false otherwise</returns>
+    /// <pre>The window is in the <see cref="State.Building"/> state and <paramref name="actionName"/> identifies a candidate action.</pre>
+    /// <post>The named action is detached from this window and removed from the action list when found.</post>
     /// <example>
     /// <code>
     /// bool removed = window.RemoveAction("attack_action");
@@ -343,7 +425,7 @@ public sealed partial class ActionWindow : MonoBehaviour
     {
         if (string.IsNullOrWhiteSpace(actionName))
         {
-            Debug.LogWarning($"{LOG_PREFIX} Cannot remove action with null or empty name");
+            LogWarn("Cannot remove action with null or empty name");
             return false;
         }
 
@@ -358,19 +440,19 @@ public sealed partial class ActionWindow : MonoBehaviour
             try
             {
                 _actions.Remove(actionToRemove);
-                actionToRemove.SetActionWindow(null!);
-                Debug.Log($"{LOG_PREFIX} Removed action '{actionName}' from window (Remaining: {_actions.Count})");
+                actionToRemove.SetActionWindow(null);
+                LogInfo($"Removed action '{actionName}' from window (Remaining: {_actions.Count})");
                 return true;
             }
             catch (Exception ex)
             {
-                Debug.LogError($"{LOG_PREFIX} Failed to remove action '{actionName}': {ex.Message}");
-                Debug.LogException(ex);
+                LogError($"Failed to remove action '{actionName}': {ex.Message}");
+                NeuroLogger.LogException(ex, "ActionWindow.RemoveAction", "ActionWindow", _windowId.ToString());
                 return false;
             }
         }
 
-        Debug.LogWarning($"{LOG_PREFIX} Action '{actionName}' not found in window");
+        LogWarn($"Action '{actionName}' not found in window");
         return false;
     }
 
@@ -387,6 +469,8 @@ public sealed partial class ActionWindow : MonoBehaviour
     /// <returns>The processed execution result (unchanged)</returns>
     /// <exception cref="ArgumentNullException">Thrown when result is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when called in an invalid state</exception>
+    /// <pre>The window has already been registered or forced and <paramref name="result"/> contains the action execution outcome.</pre>
+    /// <post>The result is published to listeners and a successful result ends the window.</post>
     /// <example>
     /// <code>
     /// var result = ExecutionResult.Success("Action completed successfully");
@@ -398,44 +482,52 @@ public sealed partial class ActionWindow : MonoBehaviour
         if (result == null)
         {
             string error = "ExecutionResult cannot be null";
-            Debug.LogError($"{LOG_PREFIX} {error}");
+            LogError(error);
             throw new ArgumentNullException(nameof(result), error);
         }
 
         if (CurrentState <= State.Building)
         {
             string error = ERROR_RESULT_BEFORE_REGISTER;
-            Debug.LogError($"{LOG_PREFIX} {error}");
+            LogError(error);
             throw new InvalidOperationException(error);
         }
 
         if (CurrentState >= State.Ended)
         {
             string error = ERROR_RESULT_AFTER_END;
-            Debug.LogError($"{LOG_PREFIX} {error}");
+            LogError(error);
             throw new InvalidOperationException(error);
         }
 
+        Stopwatch sw = Stopwatch.StartNew();
         try
         {
-            Debug.Log($"{LOG_PREFIX} Processing result: Success={result.Successful}, Message='{result.Message}'");
+            LogInfo($"Processing result: Success={result.Successful}, Message='{result.Message}'");
 
             if (result.Successful)
             {
-                Debug.Log($"{LOG_PREFIX} Result was successful, ending window");
+                LogInfo("Result was successful, ending window");
                 End();
             }
             else
             {
-                Debug.LogWarning($"{LOG_PREFIX} Result was not successful: {result.Message}");
+                LogWarn($"Result was not successful: {result.Message}");
             }
 
+                try
+                {
+                    EventAggregator?.Publish(new ActionResultEvent(TraceId, result.Successful, result.Message ?? string.Empty));
+                }
+                catch { }
+
+            LogInfo($"Processed result in {sw.ElapsedMilliseconds}ms");
             return result;
         }
         catch (Exception ex)
         {
-            Debug.LogError($"{LOG_PREFIX} Error processing result: {ex.Message}");
-            Debug.LogException(ex);
+            LogError($"Error processing result: {ex.Message}");
+            NeuroLogger.LogException(ex, "ActionWindow.Result", "ActionWindow", _windowId.ToString());
             throw;
         }
     }
@@ -460,7 +552,7 @@ public sealed partial class ActionWindow : MonoBehaviour
             // Check force condition first (higher priority)
             if (_shouldForceFunc?.Invoke() == true)
             {
-                Debug.Log($"{LOG_PREFIX} Force condition met, forcing actions");
+                LogInfo("Force condition met, forcing actions");
                 Force();
                 return; // Early exit after forcing
             }
@@ -468,25 +560,25 @@ public sealed partial class ActionWindow : MonoBehaviour
             // Check end condition
             if (_shouldEndFunc?.Invoke() == true)
             {
-                Debug.Log($"{LOG_PREFIX} End condition met, ending window");
+                LogInfo("End condition met, ending window");
                 End();
             }
         }
         catch (Exception ex)
         {
-            Debug.LogError($"{LOG_PREFIX} Error in Update: {ex.Message}");
-            Debug.LogException(ex);
+            LogError($"Error in Update: {ex.Message}");
+            NeuroLogger.LogException(ex, "ActionWindow.Update", "ActionWindow", _windowId.ToString());
 
             // Force end the window on critical errors to prevent infinite loops
             try
             {
-                Debug.LogWarning($"{LOG_PREFIX} Force ending window due to Update error");
+                LogWarn("Force ending window due to Update error");
                 End();
             }
             catch (Exception endEx)
             {
-                Debug.LogError($"{LOG_PREFIX} Failed to end window after error: {endEx.Message}");
-                Debug.LogException(endEx);
+                LogError($"Failed to end window after error: {endEx.Message}");
+                NeuroLogger.LogException(endEx, "ActionWindow.Update.End", "ActionWindow", _windowId.ToString());
             }
         }
     }

@@ -9,7 +9,6 @@ namespace NeuroMod.Tests.Websocket;
 /// Tests for the WsMessage class
 /// Tests message creation, properties, serialization, and equality
 /// </summary>
-[TestFixture]
 public class WsMessageTests
 {
     /// <summary>
@@ -209,7 +208,9 @@ public class WsMessageTests
     public void Properties_ShouldBeReadOnly()
     {
         // Arrange
-        WsMessage message = new("command", null, "game");
+        // IDE0059: Unn�tige Zuweisung eines Werts zu "message".
+        // Die Variable "message" wird nur f�r typeof(WsMessage) verwendet, nicht f�r die Tests.
+        // Fix: Entferne die unn�tige Zuweisung.
 
         // Assert - Properties should not have setters
         typeof(WsMessage).GetProperty("Command")!.CanWrite.Should().BeFalse();

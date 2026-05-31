@@ -8,7 +8,6 @@ namespace NeuroMod.Tests.BioData;
 /// Comprehensive tests for BioDataAnalyzer static class
 /// Tests bio data analysis and monitoring functionality
 /// </summary>
-[TestFixture]
 public class BioDataAnalyzerTests
 {
     [SetUp]

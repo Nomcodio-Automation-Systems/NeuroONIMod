@@ -2,12 +2,16 @@
 
 using System;
 using System.Collections.Generic;
+using NeuroMod;
 
 namespace NeuroSdk.Actions;
 
+#if DEBUG
 /// <summary>
-/// Partial class containing Debug and Utility functionality for ActionWindow
+/// Contains debug and utility functionality for <see cref="ActionWindow"/>.
 /// </summary>
+/// <pre>The action window instance exists and its internal state may be inspected without mutation.</pre>
+/// <post>These helpers expose diagnostics and validation without changing the action window lifecycle.</post>
 public sealed partial class ActionWindow
 {
     #region Debug and Utility Methods
@@ -16,6 +20,8 @@ public sealed partial class ActionWindow
     /// Returns a detailed string representation of the current ActionWindow state for debugging.
     /// </summary>
     /// <returns>String representation containing state, action count, and configuration details</returns>
+    /// <pre>The current action window state can be inspected safely.</pre>
+    /// <post>A stable diagnostic string describing the current window state is returned.</post>
     /// <example>
     /// <code>
     /// Debug.Log(window.ToString()); // Outputs: "ActionWindow [State: Registered, Actions: 3, ...]"
@@ -35,6 +41,8 @@ public sealed partial class ActionWindow
     /// Checks that the window state is consistent and all required dependencies are available.
     /// </summary>
     /// <returns>True if the window is in a valid state, false if there are issues</returns>
+    /// <pre>The current action window state and supporting fields can be inspected without side effects.</pre>
+    /// <post>The method returns whether the current state satisfies the expected lifecycle invariants.</post>
     /// <example>
     /// <code>
     /// if (!window.ValidateState())
@@ -57,7 +65,7 @@ public sealed partial class ActionWindow
                     // Must have actions to be registered
                     if (_actions.Count == 0)
                     {
-                        Debug.LogError($"{LOG_PREFIX} ValidateState: Registered state but no actions");
+                        LogError($"ValidateState: Registered state but no actions");
                         return false;
                     }
                     return true;
@@ -66,12 +74,12 @@ public sealed partial class ActionWindow
                     // Must have actions and force getters
                     if (_actions.Count == 0)
                     {
-                        Debug.LogError($"{LOG_PREFIX} ValidateState: Forced state but no actions");
+                        LogError($"ValidateState: Forced state but no actions");
                         return false;
                     }
                     if (_forceQueryGetter == null)
                     {
-                        Debug.LogError($"{LOG_PREFIX} ValidateState: Forced state but no query getter");
+                        LogError($"ValidateState: Forced state but no query getter");
                         return false;
                     }
                     return true;
@@ -81,14 +89,14 @@ public sealed partial class ActionWindow
                     return true;
 
                 default:
-                    Debug.LogError($"{LOG_PREFIX} ValidateState: Unknown state {CurrentState}");
+                    LogError($"ValidateState: Unknown state {CurrentState}");
                     return false;
             }
         }
         catch (Exception ex)
         {
-            Debug.LogError($"{LOG_PREFIX} Error validating state: {ex.Message}");
-            Debug.LogException(ex);
+            LogError($"Error validating state: {ex.Message}");
+            NeuroLogger.LogException(ex, "ActionWindow.ValidateState", "ActionWindow", _windowId.ToString());
             return false;
         }
     }
@@ -97,6 +105,8 @@ public sealed partial class ActionWindow
     /// Gets diagnostic information about the current ActionWindow for debugging.
     /// </summary>
     /// <returns>Dictionary containing diagnostic information</returns>
+    /// <pre>The current action window state can be inspected for debugging purposes.</pre>
+    /// <post>A dictionary snapshot describing the current action window state is returned.</post>
     /// <example>
     /// <code>
     /// var diagnostics = window.GetDiagnostics();
@@ -126,3 +136,4 @@ public sealed partial class ActionWindow
 
     #endregion Debug and Utility Methods
 }
+#endif

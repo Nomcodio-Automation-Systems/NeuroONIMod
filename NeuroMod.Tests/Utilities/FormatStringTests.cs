@@ -7,7 +7,6 @@ namespace NeuroMod.Tests.Utilities;
 /// <summary>
 /// Tests for the FormatString utility class
 /// </summary>
-[TestFixture]
 public class FormatStringTests
 {
     /// <summary>
@@ -183,7 +182,8 @@ public class FormatStringTests
         FormatString formatStr = "Value: {0}";
 
         // Act
-        string result = formatStr.Format((object?)null);
+        object[] args = new object[] { null! };
+        string result = formatStr.Format(args);
 
         // Assert
         result.Should().Be("Value: ");

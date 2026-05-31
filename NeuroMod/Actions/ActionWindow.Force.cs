@@ -3,13 +3,17 @@
 using NeuroSdk.Messages.Outgoing;
 using NeuroSdk.Websocket;
 using System;
+using System.Diagnostics;
 using UnityEngine;
+using NeuroMod;
 
 namespace NeuroSdk.Actions;
 
 /// <summary>
-/// Partial class containing Force Management functionality for ActionWindow
+/// Contains force-management functionality for <see cref="ActionWindow"/>.
 /// </summary>
+/// <pre>The action window may be configured with conditions that escalate from normal registration to forced selection.</pre>
+/// <post>These helpers store force predicates and payloads or trigger forced action dispatch while preserving lifecycle rules.</post>
 public sealed partial class ActionWindow
 {
     #region Force Management
@@ -18,6 +22,14 @@ public sealed partial class ActionWindow
     private Func<string>? _forceQueryGetter;
     private Func<string?>? _forceStateGetter;
     private bool _forceEphemeralContext;
+    
+    /// <summary>
+    /// When true, `Force()` will execute through the `CommandManager` using a `ForceActionsCommand`.
+    /// Default is false to preserve existing behavior.
+    /// </summary>
+    /// <pre>No input is required.</pre>
+    /// <post>The property value indicates whether forcing uses command execution or the direct transport path.</post>
+    public bool UseCommandExecution { get; set; } = false;
 
     /// <summary>
     /// Specify a condition under which the actions should be forced.
@@ -29,6 +41,8 @@ public sealed partial class ActionWindow
     /// <param name="ephemeralContext">If true, the query and state won't be remembered after the action force is finished</param>
     /// <returns>The <see cref="ActionWindow"/> itself for method chaining</returns>
     /// <exception cref="ArgumentNullException">Thrown when any required parameter is null</exception>
+    /// <pre>The window is in the <see cref="State.Building"/> state and the supplied delegates are non-null.</pre>
+    /// <post>The force condition and force payload providers are stored for later evaluation while registered.</post>
     /// <example>
     /// <code>
     /// window.SetForce(
@@ -69,7 +83,7 @@ public sealed partial class ActionWindow
         _forceQueryGetter = queryGetter;
         _forceStateGetter = stateGetter;
         _forceEphemeralContext = ephemeralContext;
-        Debug.Log($"{LOG_PREFIX} Set force condition with ephemeral context: {ephemeralContext}");
+        LogInfo($"Set force condition with ephemeral context: {ephemeralContext}");
         return this;
     }
 
@@ -81,6 +95,8 @@ public sealed partial class ActionWindow
     /// <param name="state">The state information for the force</param>
     /// <param name="ephemeralContext">If true, the query and state won't be remembered after the action force is finished</param>
     /// <returns>The <see cref="ActionWindow"/> itself for method chaining</returns>
+    /// <pre>The window is in the <see cref="State.Building"/> state and <paramref name="query"/> is non-empty.</pre>
+    /// <post>Static force query and state values are wrapped and stored as deferred providers.</post>
     /// <example>
     /// <code>
     /// window.SetForce(
@@ -113,6 +129,8 @@ public sealed partial class ActionWindow
     /// <param name="ephemeralContext">If true, the query and state won't be remembered after the action force is finished</param>
     /// <returns>The <see cref="ActionWindow"/> itself for method chaining</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when afterSeconds is not positive</exception>
+    /// <pre>The window is in the <see cref="State.Building"/> state and <paramref name="afterSeconds"/> is greater than zero.</pre>
+    /// <post>A timed force condition is stored that will become true after the configured interval elapses.</post>
     /// <example>
     /// <code>
     /// window.SetForce(15f, () => "Time's running out!", () => "timeout_warning", false);
@@ -146,6 +164,8 @@ public sealed partial class ActionWindow
     /// <param name="state">The state information for the force</param>
     /// <param name="ephemeralContext">If true, the query and state won't be remembered after the action force is finished</param>
     /// <returns>The <see cref="ActionWindow"/> itself for method chaining</returns>
+    /// <pre>The window is in the <see cref="State.Building"/> state and <paramref name="afterSeconds"/> is greater than zero.</pre>
+    /// <post>A timed force condition with static query and state payloads is stored.</post>
     /// <example>
     /// <code>
     /// window.SetForce(30f, "Time's up! Make a decision!", "timeout", true);
@@ -161,6 +181,8 @@ public sealed partial class ActionWindow
     /// This transitions the window from Registered to Forced state.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown when WebSocket connection is unavailable or force getters are null</exception>
+    /// <pre>The window is in the <see cref="State.Registered"/> state and valid force payload providers are configured.</pre>
+    /// <post>The window transitions to <see cref="State.Forced"/> and an action-force message is sent or delegated through command execution.</post>
     /// <example>
     /// <code>
     /// if (emergencyCondition)
@@ -171,9 +193,24 @@ public sealed partial class ActionWindow
     /// </example>
     public void Force()
     {
+        if (UseCommandExecution)
+        {
+            try
+            {
+                CommandManager.Execute(new NeuroMod.Architecture.Commands.ForceActionsCommand(this));
+                return;
+            }
+            catch (Exception ex)
+            {
+                LogError($"Command-based force failed: {ex.Message}");
+                NeuroLogger.LogException(ex, "ActionWindow.Force(Command)", "ActionWindow", _windowId.ToString());
+                // fall-through to built-in behavior
+            }
+        }
+
         if (CurrentState != State.Registered)
         {
-            Debug.LogWarning($"{LOG_PREFIX} Cannot force actions in state {CurrentState}");
+            LogWarn($"Cannot force actions in state {CurrentState}");
             return;
         }
 
@@ -193,19 +230,21 @@ public sealed partial class ActionWindow
 
         try
         {
+            Stopwatch sw = Stopwatch.StartNew();
+            State prev = CurrentState;
             CurrentState = State.Forced;
             _shouldForceFunc = null;
 
             string query = _forceQueryGetter();
             string? state = _forceStateGetter();
 
-            WebsocketConnection.Instance.Send(new ActionsForce(query, state, _forceEphemeralContext, _actions));
-            Debug.Log($"{LOG_PREFIX} Forced {_actions.Count} actions with query: '{query}', state: '{state}', ephemeral: {_forceEphemeralContext}");
+            NeuroMod.Integration.Api.ApiClient.Send(new ActionsForce(query, state, _forceEphemeralContext, _actions));
+            LogInfo($"Forced {_actions.Count} actions with query: '{query}', state: '{state}', ephemeral: {_forceEphemeralContext}; duration={sw.ElapsedMilliseconds}ms; prevState={prev}");
         }
         catch (Exception ex)
         {
-            Debug.LogError($"{LOG_PREFIX} Failed to force actions: {ex.Message}");
-            Debug.LogException(ex);
+            LogError($"Failed to force actions: {ex.Message}");
+            NeuroLogger.LogException(ex, "ActionWindow.Force", "ActionWindow", _windowId.ToString());
             throw;
         }
     }

@@ -12,31 +12,42 @@ namespace NeuroMod.Tests.Actions;
 /// Comprehensive tests for NeuroActionHandler class
 /// Tests action registration, unregistration, and lifecycle management
 /// </summary>
-[TestFixture]
+/// <pre>Most handler operations remain Unity-bound in the current environment, so many registration tests are intentionally skipped.</pre>
+/// <post>The contained tests document the expected handler behavior and provide lightweight helper types for future runtime-backed coverage.</post>
 public class NeuroActionHandlerTests
 {
     private MockWebsocketConnection _mockWebsocket = null!;
     private List<INeuroAction> _testActions = null!;
 
     [SetUp]
+    /// <summary>
+    /// Prepares representative test actions and clears prior registrations before each test.
+    /// </summary>
+    /// <pre>Previous tests may have left helper state or action registrations behind.</pre>
+    /// <post>The fixture contains a fresh mock websocket and representative test actions for the current test.</post>
     public void Setup()
     {
         _mockWebsocket = new MockWebsocketConnection();
 
         // Create test actions
-        _testActions =
-        [
+        _testActions = new List<INeuroAction>
+        {
             new TestAction("test_action_1", "Test Action 1"),
             new TestAction("test_action_2", "Test Action 2"),
             new TestAction("test_action_3", "Test Action 3")
-        ];
+        };
 
         // Clear any existing registrations
         ClearRegisteredActions();
     }
 
     [TearDown]
-    public void Cleanup()
+    /// <summary>
+    /// Clears registrations after each test.
+    /// </summary>
+    /// <pre>A handler-oriented test has completed.</pre>
+    /// <post>Any test-specific registration state is cleared for subsequent tests.</post>
+    public void TearDown()
     {
         ClearRegisteredActions();
     }
@@ -44,6 +55,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Test that actions can be registered successfully
     /// </summary>
+    /// <pre>A representative action set exists, but the real handler remains Unity-bound in the current environment.</pre>
+    /// <post>The skipped test preserves the intended successful-registration contract for future runtime-backed execution.</post>
     [Test]
     [Ignore("Requires Unity runtime - NeuroActionHandler depends on Unity types")]
     public void RegisterActions_WithValidActions_ShouldRegisterSuccessfully()
@@ -70,6 +83,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Test that registering an action with same name replaces the old one
     /// </summary>
+    /// <pre>A representative action set exists, but the real handler remains Unity-bound in the current environment.</pre>
+    /// <post>The skipped test preserves the intended duplicate-name replacement contract.</post>
     [Test]
     [Ignore("Requires Unity runtime - NeuroActionHandler depends on Unity types")]
     public void RegisterActions_WithDuplicateName_ShouldReplaceExistingAction()
@@ -92,6 +107,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Test that actions can be unregistered by name
     /// </summary>
+    /// <pre>A representative action set exists, but the real handler remains Unity-bound in the current environment.</pre>
+    /// <post>The skipped test preserves the intended unregister-by-name contract.</post>
     [Test]
     [Ignore("Requires Unity runtime - NeuroActionHandler depends on Unity types")]
     public void UnregisterActions_WithValidNames_ShouldUnregisterSuccessfully()
@@ -116,6 +133,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Test that actions can be unregistered by reference
     /// </summary>
+    /// <pre>A representative action set exists, but the real handler remains Unity-bound in the current environment.</pre>
+    /// <post>The skipped test preserves the intended unregister-by-reference contract.</post>
     [Test]
     [Ignore("Requires Unity runtime - NeuroActionHandler depends on Unity types")]
     public void UnregisterActions_WithActionReferences_ShouldUnregisterSuccessfully()
@@ -140,6 +159,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Test that recently unregistered actions are tracked correctly
     /// </summary>
+    /// <pre>A representative action set exists, but the real handler remains Unity-bound in the current environment.</pre>
+    /// <post>The skipped test preserves the intended recently-unregistered tracking contract.</post>
     [Test]
     [Ignore("Requires Unity runtime - NeuroActionHandler depends on Unity types")]
     public void IsRecentlyUnregistered_AfterUnregistration_ShouldReturnTrue()
@@ -158,6 +179,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Test that GetRegistered returns null for non-existent actions
     /// </summary>
+    /// <pre>A representative action set exists, but the real handler remains Unity-bound in the current environment.</pre>
+    /// <post>The skipped test preserves the intended missing-action lookup contract.</post>
     [Test]
     [Ignore("Requires Unity runtime - NeuroActionHandler depends on Unity types")]
     public void GetRegistered_WithNonExistentAction_ShouldReturnNull()
@@ -175,6 +198,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Test that ResendRegisteredActions works correctly
     /// </summary>
+    /// <pre>A representative action set exists, but the real handler remains Unity-bound in the current environment.</pre>
+    /// <post>The skipped test preserves the intended resend behavior and graceful null-websocket handling contract.</post>
     [Test]
     [Ignore("Requires Unity runtime - NeuroActionHandler depends on Unity types")]
     public void ResendRegisteredActions_ShouldSendCurrentlyRegisteredActions()
@@ -196,6 +221,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Test that empty collections are handled gracefully
     /// </summary>
+    /// <pre>The real handler remains Unity-bound in the current environment.</pre>
+    /// <post>The skipped test preserves the intended empty-registration no-op contract.</post>
     [Test]
     [Ignore("Requires Unity runtime - NeuroActionHandler depends on Unity types")]
     public void RegisterActions_WithEmptyCollection_ShouldHandleGracefully()
@@ -211,6 +238,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Test that unregistering non-existent actions is handled gracefully
     /// </summary>
+    /// <pre>A representative action set exists, but the real handler remains Unity-bound in the current environment.</pre>
+    /// <post>The skipped test preserves the intended graceful handling of unknown unregistration requests.</post>
     [Test]
     [Ignore("Requires Unity runtime - NeuroActionHandler depends on Unity types")]
     public void UnregisterActions_WithNonExistentActions_ShouldHandleGracefully()
@@ -229,6 +258,8 @@ public class NeuroActionHandlerTests
     /// <summary>
     /// Helper method to clear all registered actions for testing
     /// </summary>
+    /// <pre>Test setup or teardown may need to clear handler registration state.</pre>
+    /// <post>The current placeholder performs no additional work beyond documenting the intended cleanup seam.</post>
     private void ClearRegisteredActions()
     {
         // In a real implementation, this would require access to the private fields
@@ -239,28 +270,68 @@ public class NeuroActionHandlerTests
 /// <summary>
 /// Test implementation of INeuroAction for testing purposes
 /// </summary>
+/// <pre>The helper action is used only within action-handler tests.</pre>
+/// <post>The type provides a lightweight INeuroAction implementation suitable for non-Unity handler scenarios.</post>
 public class TestAction(string name, string description) : INeuroAction
 {
+    /// <summary>
+    /// Gets the test action name.
+    /// </summary>
+    /// <pre>The helper action was constructed with a stable name.</pre>
+    /// <post>The property returns the action name captured during construction.</post>
     public string Name { get; } = name;
+
+    /// <summary>
+    /// Gets the action window last assigned to this helper action.
+    /// </summary>
+    /// <pre>The helper action may or may not have been associated with an action window.</pre>
+    /// <post>The property returns the last action-window reference supplied through <see cref="SetActionWindow"/>.</post>
     public ActionWindow? ActionWindow { get; private set; }
     private readonly string _description = description;
 
+    /// <summary>
+    /// Reports that the helper action can always be added to an action window.
+    /// </summary>
+    /// <param name="actionWindow">The candidate action window.</param>
+    /// <returns>Always <see langword="true"/> for this helper implementation.</returns>
+    /// <pre>The helper action participates only in lightweight handler tests.</pre>
+    /// <post>The method returns true without additional validation.</post>
     public bool CanAddToActionWindow(ActionWindow actionWindow)
     {
         return true;
     }
 
+    /// <summary>
+    /// Produces a successful validation result for the helper action.
+    /// </summary>
+    /// <param name="actionData">The action payload supplied by the caller.</param>
+    /// <param name="data">Receives a simple success payload.</param>
+    /// <returns>A successful validation result.</returns>
+    /// <pre>The helper action is used in lightweight handler tests and does not require real payload validation.</pre>
+    /// <post>The method returns a success result and supplies a trivial success payload.</post>
     public ExecutionResult Validate(ActionJData actionData, out object? data)
     {
         data = new { success = true };
         return ExecutionResult.Success("Validation successful");
     }
 
+    /// <summary>
+    /// Executes the helper action asynchronously with a short artificial delay.
+    /// </summary>
+    /// <param name="data">Optional execution payload.</param>
+    /// <pre>The helper action is used in lightweight handler tests and does not require real runtime side effects.</pre>
+    /// <post>The returned task completes after a short delay without throwing.</post>
     public async Cysharp.Threading.Tasks.UniTask ExecuteAsync(object? data)
     {
         await System.Threading.Tasks.Task.Delay(10);
     }
 
+    /// <summary>
+    /// Produces the websocket action description for this helper action.
+    /// </summary>
+    /// <returns>A websocket action with a simple one-parameter schema.</returns>
+    /// <pre>The helper action was constructed with a stable name and description.</pre>
+    /// <post>The returned websocket action exposes a representative schema for handler tests.</post>
     public WsAction GetWsAction()
     {
         return new WsAction(
@@ -277,7 +348,13 @@ public class TestAction(string name, string description) : INeuroAction
         );
     }
 
-    public void SetActionWindow(ActionWindow actionWindow)
+    /// <summary>
+    /// Records the action window associated with this helper action.
+    /// </summary>
+    /// <param name="actionWindow">The action window to associate, or null.</param>
+    /// <pre>The helper action may be associated with an action window during test setup.</pre>
+    /// <post>The property <see cref="ActionWindow"/> stores the supplied reference.</post>
+    public void SetActionWindow(ActionWindow? actionWindow)
     {
         ActionWindow = actionWindow;
     }
@@ -286,28 +363,58 @@ public class TestAction(string name, string description) : INeuroAction
 /// <summary>
 /// Mock WebsocketConnection for testing
 /// </summary>
+/// <pre>The helper websocket is used only within action-handler tests.</pre>
+/// <post>The type records sent messages in memory for later inspection by tests.</post>
 public class MockWebsocketConnection
 {
+    /// <summary>
+    /// Gets a value indicating whether at least one message has been sent.
+    /// </summary>
+    /// <pre>The helper websocket may or may not have recorded outbound messages.</pre>
+    /// <post>The property reports whether any send method has been invoked since the last clear.</post>
     public bool HasSentMessage { get; private set; }
     private readonly List<object> _sentMessages = [];
 
+    /// <summary>
+    /// Records a sent websocket message.
+    /// </summary>
+    /// <param name="message">The outbound message to record.</param>
+    /// <pre>The helper websocket is being used to simulate outbound message dispatch.</pre>
+    /// <post>The supplied message is recorded and <see cref="HasSentMessage"/> becomes true.</post>
     public void Send(object message)
     {
         _sentMessages.Add(message);
         HasSentMessage = true;
     }
 
+    /// <summary>
+    /// Records an immediate-send websocket message using the standard send path.
+    /// </summary>
+    /// <param name="message">The outbound message to record.</param>
+    /// <pre>The helper websocket is being used to simulate immediate outbound message dispatch.</pre>
+    /// <post>The supplied message is recorded through the normal send path.</post>
     public void SendImmediate(object message)
     {
         Send(message);
     }
 
+    /// <summary>
+    /// Clears all recorded outbound messages.
+    /// </summary>
+    /// <pre>The helper websocket may already contain recorded messages.</pre>
+    /// <post>The recorded message list is empty and <see cref="HasSentMessage"/> is false.</post>
     public void ClearSentMessages()
     {
         _sentMessages.Clear();
         HasSentMessage = false;
     }
 
+    /// <summary>
+    /// Returns a snapshot of the recorded outbound messages.
+    /// </summary>
+    /// <returns>A copy of the messages recorded so far.</returns>
+    /// <pre>The helper websocket may have recorded outbound messages.</pre>
+    /// <post>The method returns a copy of the recorded message list.</post>
     public List<object> GetSentMessages()
     {
         return [.. _sentMessages];

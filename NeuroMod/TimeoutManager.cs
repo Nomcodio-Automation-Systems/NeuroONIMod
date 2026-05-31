@@ -6,13 +6,29 @@ using System.Threading.Tasks;
 namespace NeuroMod;
 
 /// <summary>
-/// Manages timeout handling for Neuro SDK operations
-/// Provides fallback behavior when Neuro doesn't respond within configured time
+/// Manages timeout handling for Neuro SDK operations.
 /// </summary>
+/// <pre>Timeout-related configuration is available via <see cref="ConfigManager"/> when operations are executed.</pre>
+/// <post>Operations are tracked, timed out when necessary, and may trigger fallback or escalation behavior.</post>
 public class TimeoutManager
 {
     private static TimeoutManager? _instance;
+
+    /// <summary>
+    /// Gets the singleton timeout manager instance.
+    /// </summary>
     public static TimeoutManager Instance => _instance ??= new TimeoutManager();
+
+    /// <summary>
+    /// Replaces the singleton instance.
+    /// </summary>
+    /// <param name="instance">The timeout manager instance to use.</param>
+    /// <pre><paramref name="instance"/> is a non-null timeout manager, typically provided by tests.</pre>
+    /// <post>Subsequent access to <see cref="Instance"/> returns the supplied manager.</post>
+    public static void SetInstance(TimeoutManager instance)
+    {
+        _instance = instance;
+    }
 
     private readonly ConcurrentDictionary<string, PendingOperation> _pendingOperations;
     private readonly CancellationTokenSource _cancellationTokenSource;
@@ -20,12 +36,22 @@ public class TimeoutManager
     private bool _isManualModeActive = false;
 
     /// <summary>
-    /// Gets the current timeout count
+    /// Separable API client used by the manager. Tests may override this to intercept sends.
+    /// </summary>
+    protected virtual Integration.Api.IApiClient Api => Integration.Api.ApiClient.Instance;
+
+    /// <summary>
+    /// Separable NotificationManager used for display and user-facing messages. Tests may replace it.
+    /// </summary>
+    protected virtual NotificationManager Notifications => NotificationManager.Instance;
+
+    /// <summary>
+    /// Gets the current timeout count.
     /// </summary>
     public int TimeoutCount => _timeoutCount;
 
     /// <summary>
-    /// Indicates if manual mode is currently active due to excessive timeouts
+    /// Gets a value indicating whether manual mode is currently active because of excessive timeouts.
     /// </summary>
     public bool IsManualModeActive => _isManualModeActive;
 
@@ -36,13 +62,17 @@ public class TimeoutManager
     }
 
     /// <summary>
-    /// Executes a Neuro operation with timeout handling
+    /// Executes an asynchronous Neuro operation with configured timeout handling
+    /// and applies fallback strategies when a timeout occurs.
     /// </summary>
-    /// <param name="operationType">Type of operation (decision, action, query)</param>
-    /// <param name="operation">The operation to execute</param>
-    /// <param name="fallbackAction">Fallback action if timeout occurs</param>
-    /// <param name="customTimeout">Custom timeout override</param>
-    /// <returns>Operation result or fallback result</returns>
+    /// <typeparam name="T">Return type of the operation.</typeparam>
+    /// <param name="operationType">Type of operation (for example, "decision", "action", "query").</param>
+    /// <param name="operation">Delegate that performs the operation and returns a <see cref="Task{TResult}"/>.</param>
+    /// <param name="fallbackAction">Optional fallback function to compute a result on timeout or error.</param>
+    /// <param name="customTimeout">Optional per-call timeout in seconds; when null, configuration values are used.</param>
+    /// <returns>A task that completes with the operation result or the fallback result when a timeout occurs.</returns>
+    /// <pre>The supplied delegates are valid and any optional custom timeout is appropriate for the operation type.</pre>
+    /// <post>The pending operation is removed from tracking and a result or fallback value is returned.</post>
     public async Task<T> ExecuteWithTimeout<T>(
         string operationType,
         Func<Task<T>> operation,
@@ -65,8 +95,7 @@ public class TimeoutManager
 
             _pendingOperations.TryAdd(operationId, pendingOp);
 
-            Debug.Log(
-                $"[TimeoutManager] Starting {operationType} operation {operationId} with {timeout}s timeout");
+            NeuroLogger.Log($"[TimeoutManager] Starting {operationType} operation {operationId} with {timeout}s timeout", "TimeoutManager");
 
             // Execute operation with timeout
             using CancellationTokenSource timeoutToken = new(TimeSpan.FromSeconds(timeout));
@@ -79,7 +108,7 @@ public class TimeoutManager
             {
                 // Operation completed successfully
                 _pendingOperations.TryRemove(operationId, out _);
-                Debug.Log($"[TimeoutManager] Operation {operationId} completed successfully");
+                NeuroLogger.Log($"[TimeoutManager] Operation {operationId} completed successfully", "TimeoutManager");
                 return await task;
             }
             else
@@ -102,12 +131,16 @@ public class TimeoutManager
     }
 
     /// <summary>
-    /// Executes a void Neuro operation with timeout handling
+    /// Executes a fire-and-forget Neuro operation with timeout handling and an
+    /// optional fallback action invoked on timeout.
     /// </summary>
-    /// <param name="operationType">Type of operation</param>
-    /// <param name="operation">The operation to execute</param>
-    /// <param name="fallbackAction">Fallback action if timeout occurs</param>
-    /// <param name="customTimeout">Custom timeout override</param>
+    /// <param name="operationType">Type identifier used to lookup timeout and fallback strategy.</param>
+    /// <param name="operation">Asynchronous operation to run.</param>
+    /// <param name="fallbackAction">Optional fallback action to invoke when a timeout occurs.</param>
+    /// <param name="customTimeout">Optional custom timeout in seconds.</param>
+    /// <returns>A task that completes when the operation and any fallback have finished.</returns>
+    /// <pre>The supplied operation can be executed asynchronously and the optional fallback action may be invoked safely.</pre>
+    /// <post>The operation has either completed or a fallback action has been applied after timeout handling.</post>
     public async Task ExecuteWithTimeout(
         string operationType,
         Func<Task> operation,
@@ -132,14 +165,15 @@ fallback,
     }
 
     /// <summary>
-    /// Handles timeout scenarios with configured fallback strategies
+    /// Internal: handles a timed-out operation, applying the configured fallback
+    /// strategy and performing any configured escalation.
     /// </summary>
     private async Task<T> HandleTimeout<T>(string operationId, string operationType, Func<T>? fallbackAction)
     {
         _timeoutCount++;
         _pendingOperations.TryRemove(operationId, out _);
 
-        Debug.LogWarning($"[TimeoutManager] Operation {operationId} ({operationType}) timed out. Total timeouts: {_timeoutCount}");
+        NeuroLogger.LogWarning($"[TimeoutManager] Operation {operationId} ({operationType}) timed out. Total timeouts: {_timeoutCount}", "TimeoutManager");
 
         // Show warning if configured
         if (ConfigManager.Instance.Config?.Timeout?.ShowTimeoutWarnings == true)
@@ -200,7 +234,7 @@ fallback,
     /// </summary>
     private async Task<T> ApplyFallbackStrategy<T>(string strategy, Func<T>? fallbackAction)
     {
-        Debug.Log($"[TimeoutManager] Applying fallback strategy: {strategy}");
+        NeuroLogger.Log($"[TimeoutManager] Applying fallback strategy: {strategy}", "TimeoutManager");
 
         switch (strategy.ToLower())
         {
@@ -229,7 +263,7 @@ fallback,
     private T GetLastKnownPreference<T>()
     {
         // Implementation depends on your preference caching system
-        Debug.Log("[TimeoutManager] Using last known preference");
+        NeuroLogger.Log("[TimeoutManager] Using last known preference", "TimeoutManager");
         return default!;
     }
 
@@ -239,7 +273,7 @@ fallback,
     private T GetCachedData<T>()
     {
         // Implementation depends on your caching system
-        Debug.Log("[TimeoutManager] Using cached data");
+        NeuroLogger.Log("[TimeoutManager] Using cached data", "TimeoutManager");
         return default!;
     }
 
@@ -295,8 +329,8 @@ fallback,
     {
         Debug.LogWarning($"[TimeoutManager] Neuro {operationType} timed out. Using fallback behavior.");
 
-        // Use the notification system
-        NotificationManager.Instance.ShowTimeoutWarning(operationType, _timeoutCount);
+        // Use the notification system (seam for tests)
+        Notifications.ShowTimeoutWarning(operationType, _timeoutCount);
     }
 
     /// <summary>
@@ -305,7 +339,7 @@ fallback,
     private void ShowManualModeNotification()
     {
         Debug.LogWarning("[TimeoutManager] Too many timeouts detected. Switching to manual mode.");
-        NotificationManager.Instance.ShowManualModeActivated();
+        Notifications.ShowManualModeActivated();
     }
 
     /// <summary>
@@ -313,19 +347,19 @@ fallback,
     /// </summary>
     private void RestartNeuroConnection()
     {
-        Debug.Log("[TimeoutManager] Attempting to restart Neuro connection");
+        NeuroLogger.Log("[TimeoutManager] Attempting to restart Neuro connection", "TimeoutManager");
 
         try
         {
             // Note: WebsocketConnection manages its own connection lifecycle
             // We can only log that we would restart the connection
-            Debug.Log("[TimeoutManager] Connection restart requested - WebsocketConnection will handle reconnection automatically");
+            NeuroLogger.Log("[TimeoutManager] Connection restart requested - WebsocketConnection will handle reconnection automatically", "TimeoutManager");
 
             _timeoutCount = 0; // Reset timeout count after restart
         }
         catch (Exception ex)
         {
-            Debug.LogError($"[TimeoutManager] Failed to restart connection: {ex.Message}");
+            NeuroLogger.LogError($"[TimeoutManager] Failed to restart connection: {ex.Message}", "TimeoutManager");
         }
     }
 
@@ -334,43 +368,76 @@ fallback,
     /// </summary>
     private void DisableNeuroIntegration()
     {
-        Debug.LogWarning("[TimeoutManager] Disabling Neuro integration due to excessive timeouts");
+        NeuroLogger.LogWarning("[TimeoutManager] Disabling Neuro integration due to excessive timeouts", "TimeoutManager");
         // Implementation depends on your system architecture
     }
 
     /// <summary>
-    /// Resets the timeout count (can be called when connection is restored)
+    /// Resets internal timeout counters and clears manual mode.
     /// </summary>
+    /// <pre>The Neuro connection is considered healthy again and timeout escalation can be cleared.</pre>
+    /// <post>The timeout count is reset and manual mode is deactivated.</post>
     public void ResetTimeoutCount()
     {
         _timeoutCount = 0;
         _isManualModeActive = false;
-        Debug.Log("[TimeoutManager] Timeout count reset");
+        NeuroLogger.Log("[TimeoutManager] Timeout count reset", "TimeoutManager");
     }
 
     /// <summary>
-    /// Gets current pending operations count
+    /// Returns the number of currently tracked pending operations.
     /// </summary>
+    /// <returns>Count of pending operations.</returns>
+    /// <pre>Pending operation tracking is active within the timeout manager.</pre>
+    /// <post>The current number of tracked pending operations is returned without mutation.</post>
     public int GetPendingOperationsCount()
     {
         return _pendingOperations.Count;
     }
 
     /// <summary>
-    /// Cancels all pending operations
+    /// Cancels and clears all pending operations immediately.
     /// </summary>
+    /// <pre>There may be tracked operations waiting on timeout handling.</pre>
+    /// <post>The cancellation token source is signaled and all tracked pending operations are cleared.</post>
     public void CancelAllOperations()
     {
         _cancellationTokenSource.Cancel();
         _pendingOperations.Clear();
-        Debug.Log("[TimeoutManager] All pending operations cancelled");
+        NeuroLogger.Log("[TimeoutManager] All pending operations cancelled", "TimeoutManager");
     }
 
+    /// <summary>
+    /// Internal structure representing an outstanding operation tracked for timeouts.
+    /// </summary>
     private class PendingOperation
     {
+        /// <summary>
+        /// Unique identifier for the operation instance.
+        /// </summary>
+        /// <pre>The pending-operation object represents one tracked timeout record.</pre>
+        /// <post>The property stores the unique identifier of the tracked operation.</post>
         public string Id { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Logical type of the operation (decision/action/query).
+        /// </summary>
+        /// <pre>The pending-operation object represents one tracked timeout record.</pre>
+        /// <post>The property stores the logical operation category.</post>
         public string Type { get; set; } = string.Empty;
+
+        /// <summary>
+        /// UTC time when the operation started.
+        /// </summary>
+        /// <pre>The pending-operation object represents one tracked timeout record.</pre>
+        /// <post>The property stores the UTC timestamp when tracking began.</post>
         public System.DateTime StartTime { get; set; } = default!;
+
+        /// <summary>
+        /// Timeout in seconds for this operation.
+        /// </summary>
+        /// <pre>The pending-operation object represents one tracked timeout record.</pre>
+        /// <post>The property stores the timeout threshold for the tracked operation.</post>
         public int TimeoutSeconds { get; set; }
     }
 }

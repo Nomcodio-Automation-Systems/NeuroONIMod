@@ -9,7 +9,6 @@ namespace NeuroMod.Tests.Json;
 /// Tests for JsonSchema class
 /// Tests schema creation, properties, type conversions, and validation constraints
 /// </summary>
-[TestFixture]
 public class JsonSchemaTests
 {
     /// <summary>

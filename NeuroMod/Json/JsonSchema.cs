@@ -7,8 +7,18 @@ using System.Collections.Generic;
 namespace NeuroSdk.Json;
 
 [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
+/// <summary>
+/// Represents a mutable JSON schema fragment used to describe Neuro SDK message payloads.
+/// </summary>
+/// <pre>Callers populate only the keywords relevant to the schema node they want to emit.</pre>
+/// <post>The instance serializes to JSON schema-compatible keyword fields understood by Neuro clients.</post>
 public sealed class JsonSchema
 {
+    /// <summary>
+    /// Gets or sets the child property schemas for object-shaped payloads.
+    /// </summary>
+    /// <pre>The schema represents or may represent an object payload.</pre>
+    /// <post>The returned dictionary is never null and contains the configured property schemas.</post>
     [JsonIgnore]
     public Dictionary<string, JsonSchema> Properties
     {
@@ -16,6 +26,11 @@ public sealed class JsonSchema
         set => _properties = value;
     }
 
+    /// <summary>
+    /// Gets or sets the logical schema type using the SDK enum abstraction.
+    /// </summary>
+    /// <pre>The backing string keyword, when present, maps to a supported <see cref="JsonSchemaType"/> value.</pre>
+    /// <post>Reading and writing through this property keeps the enum abstraction synchronized with the serialized type keyword.</post>
     [JsonIgnore]
     public JsonSchemaType Type
     {
@@ -42,6 +57,11 @@ public sealed class JsonSchema
         };
     }
 
+    /// <summary>
+    /// Gets or sets the allowed enum values for the schema.
+    /// </summary>
+    /// <pre>The schema should restrict payloads to a discrete set of literal values.</pre>
+    /// <post>The returned list is never null and contains the configured enum values.</post>
     [JsonIgnore]
     public List<object> Enum
     {
@@ -49,6 +69,11 @@ public sealed class JsonSchema
         set => _enum = value;
     }
 
+    /// <summary>
+    /// Gets or sets the required property names for object schemas.
+    /// </summary>
+    /// <pre>The schema represents or may represent an object payload.</pre>
+    /// <post>The returned list is never null and contains the configured required-property names.</post>
     [JsonIgnore]
     public List<string> Required
     {

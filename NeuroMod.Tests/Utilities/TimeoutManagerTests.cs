@@ -8,7 +8,6 @@ namespace NeuroMod.Tests.Utilities;
 /// Comprehensive tests for TimeoutManager class
 /// Tests timeout handling, operation management, and error scenarios
 /// </summary>
-[TestFixture]
 public class TimeoutManagerTests
 {
     private TimeoutManager _timeoutManager = null!;

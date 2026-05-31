@@ -9,7 +9,6 @@ namespace NeuroMod.Tests.Utilities
     /// <summary>
     /// Tests for utility components that don't require Unity dependencies
     /// </summary>
-    [TestFixture]
     public class UtilityTests
     {
         [Test]

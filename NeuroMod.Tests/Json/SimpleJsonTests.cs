@@ -10,7 +10,6 @@ namespace NeuroMod.Tests.Json;
 /// <summary>
 /// Comprehensive tests for JSON schema functionality
 /// </summary>
-[TestFixture]
 public class SimpleJsonTests
 {
     [Test]

@@ -7,7 +7,6 @@ namespace NeuroMod.Tests.BioData;
 /// <summary>
 /// Basic tests for BioData monitoring components
 /// </summary>
-[TestFixture]
 public class SimpleBioDataTests
 {
     [Test]
@@ -17,7 +16,6 @@ public class SimpleBioDataTests
         // Assert
         DuplicateBioDataMonitor.Instance.Should().NotBeNull();
     }
-
     [Test]
     public void BioDataAnalyzer_ShouldHaveStaticMethods()
     {

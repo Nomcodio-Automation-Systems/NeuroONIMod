@@ -4,8 +4,10 @@ using UnityEngine;
 namespace NeuroMod;
 
 /// <summary>
-/// Component for real-time monitoring of duplicate bio data
+/// Monitors live duplicate bio data and raises alerts when configured thresholds are crossed.
 /// </summary>
+/// <pre>The component is spawned once and remains subscribed to the bio-data patch stream while active.</pre>
+/// <post>Threshold-based warning events are raised without crashing the monitor when subscribers throw.</post>
 public class DuplicateBioDataMonitor : KMonoBehaviour, ISim1000ms
 {
     private static DuplicateBioDataMonitor? instance;
@@ -13,6 +15,9 @@ public class DuplicateBioDataMonitor : KMonoBehaviour, ISim1000ms
 
     private readonly Dictionary<MinionIdentity, DuplicateBioData> lastKnownData =
         [];
+
+    // Wrapped delegate reference for safe subscription
+    private System.Action<MinionIdentity, DuplicateBioData>? _onBioDataUpdatedWrapped;
 
     [SerializeField]
     private bool enableDebugLogging = true;
@@ -56,17 +61,19 @@ public class DuplicateBioDataMonitor : KMonoBehaviour, ISim1000ms
     {
         base.OnSpawn();
 
-        // Subscribe to bio data updates
-        DuplicateBioDataPatches.OnBioDataUpdated += OnBioDataUpdated;
+        // Subscribe to bio data updates (wrapped to protect monitor from subscriber exceptions)
+        _onBioDataUpdatedWrapped = NeuroMod.Api.EventSubscriber.Wrap<MinionIdentity, DuplicateBioData>("DuplicateBioDataMonitor.OnBioDataUpdated", OnBioDataUpdated);
+        DuplicateBioDataPatches.OnBioDataUpdated += _onBioDataUpdatedWrapped;
 
-        LogDebug("[BioMonitor] Bio data monitor initialized");
+        LogDebug("[BioMonitor] Bio data monitor initialized (wrapped)");
     }
 
     protected override void OnCleanUp()
     {
-        if (DuplicateBioDataPatches.OnBioDataUpdated != null)
+        if (_onBioDataUpdatedWrapped != null)
         {
-            DuplicateBioDataPatches.OnBioDataUpdated -= OnBioDataUpdated;
+            DuplicateBioDataPatches.OnBioDataUpdated -= _onBioDataUpdatedWrapped;
+            _onBioDataUpdatedWrapped = null;
         }
         base.OnCleanUp();
     }
@@ -138,16 +145,20 @@ public class DuplicateBioDataMonitor : KMonoBehaviour, ISim1000ms
     }
 
     /// <summary>
-    /// Get current bio data for all duplicates
+    /// Gets the current bio data snapshot for every live duplicate.
     /// </summary>
+    /// <pre>The patch layer is initialized and able to resolve bio data for live minions.</pre>
+    /// <post>Returns a new dictionary snapshot keyed by the live minions found at call time.</post>
     public Dictionary<MinionIdentity, DuplicateBioData> GetAllCurrentBioData()
     {
         return DuplicateBioDataPatches.GetAllBioData();
     }
 
     /// <summary>
-    /// Get duplicates in critical condition
+    /// Gets the duplicates that currently satisfy the monitor's critical-condition contract.
     /// </summary>
+    /// <pre>Configured thresholds describe the urgent conditions that should be treated as critical.</pre>
+    /// <post>The returned list excludes non-critical warnings such as ordinary sickness or temperature discomfort.</post>
     public List<MinionIdentity> GetCriticalDuplicates()
     {
         List<MinionIdentity> criticalDupes = [];
@@ -166,21 +177,25 @@ public class DuplicateBioDataMonitor : KMonoBehaviour, ISim1000ms
     }
 
     /// <summary>
-    /// Check if a duplicate is in critical condition
+    /// Determines whether the provided snapshot represents a critical condition.
     /// </summary>
+    /// <param name="bioData">The duplicate snapshot to evaluate.</param>
+    /// <returns><c>true</c> when the duplicate is in an urgent state that warrants critical handling; otherwise <c>false</c>.</returns>
+    /// <pre><paramref name="bioData"/> is a non-null snapshot for a live or recently tracked duplicate.</pre>
+    /// <post>Only severe health, starvation, oxygen, or high-stress states are classified as critical.</post>
     public bool IsCritical(DuplicateBioData bioData)
     {
         return bioData.HealthPercentage < criticalHealthThreshold ||
                bioData.CaloriePercentage < starvationThreshold ||
                bioData.StressPercentage > highStressThreshold ||
-               bioData.IsSick ||
-               bioData.IsOverheating ||
-               bioData.IsFreezing;
+               bioData.NeedsOxygen;
     }
 
     /// <summary>
-    /// Get duplicates by health status
+    /// Groups duplicates into one primary health-status bucket each.
     /// </summary>
+    /// <pre>The current bio data snapshot is available for the tracked duplicates.</pre>
+    /// <post>Each duplicate appears in at most one returned status bucket.</post>
     public Dictionary<string, List<MinionIdentity>> GetDuplicatesByHealthStatus()
     {
         Dictionary<string, List<MinionIdentity>> statusGroups = new()
@@ -230,8 +245,10 @@ public class DuplicateBioDataMonitor : KMonoBehaviour, ISim1000ms
     }
 
     /// <summary>
-    /// Log bio data for all duplicates
+    /// Logs the current bio data snapshot for every live duplicate.
     /// </summary>
+    /// <pre>Debug logging may be disabled, in which case no messages are emitted.</pre>
+    /// <post>One summary header plus one line per duplicate is written when logging is enabled.</post>
     public void LogAllBioData()
     {
         Dictionary<MinionIdentity, DuplicateBioData> allData = GetAllCurrentBioData();
@@ -244,8 +261,10 @@ public class DuplicateBioDataMonitor : KMonoBehaviour, ISim1000ms
     }
 
     /// <summary>
-    /// Log critical duplicates summary
+    /// Logs a summary of duplicates that are currently in critical condition.
     /// </summary>
+    /// <pre>The critical-condition contract is defined by <see cref="IsCritical(DuplicateBioData)"/>.</pre>
+    /// <post>The log contains either the critical duplicate summary or a single healthy-state message.</post>
     public void LogCriticalSummary()
     {
         List<MinionIdentity> criticalDupes = GetCriticalDuplicates();
@@ -284,26 +303,56 @@ public class DuplicateBioDataMonitor : KMonoBehaviour, ISim1000ms
 
     #region Configuration
 
+    /// <summary>
+    /// Sets the health percentage below which a duplicate is treated as critical.
+    /// </summary>
+    /// <param name="threshold">The desired normalized threshold.</param>
+    /// <pre><paramref name="threshold"/> is expressed as a normalized percentage.</pre>
+    /// <post>The stored threshold is clamped to the inclusive range [0, 1].</post>
     public void SetCriticalHealthThreshold(float threshold)
     {
         criticalHealthThreshold = Mathf.Clamp01(threshold);
     }
 
+    /// <summary>
+    /// Sets the calorie percentage below which a duplicate is treated as starving.
+    /// </summary>
+    /// <param name="threshold">The desired normalized threshold.</param>
+    /// <pre><paramref name="threshold"/> is expressed as a normalized percentage.</pre>
+    /// <post>The stored threshold is clamped to the inclusive range [0, 1].</post>
     public void SetStarvationThreshold(float threshold)
     {
         starvationThreshold = Mathf.Clamp01(threshold);
     }
 
+    /// <summary>
+    /// Sets the stress percentage above which a duplicate is treated as highly stressed.
+    /// </summary>
+    /// <param name="threshold">The desired normalized threshold.</param>
+    /// <pre><paramref name="threshold"/> is expressed as a normalized percentage.</pre>
+    /// <post>The stored threshold is clamped to the inclusive range [0, 1].</post>
     public void SetHighStressThreshold(float threshold)
     {
         highStressThreshold = Mathf.Clamp01(threshold);
     }
 
+    /// <summary>
+    /// Enables or disables threshold-based critical alerts.
+    /// </summary>
+    /// <param name="enable"><c>true</c> to emit alerts; otherwise <c>false</c>.</param>
+    /// <pre>The monitor is already initialized.</pre>
+    /// <post>Subsequent updates either emit alerts or remain silent based on <paramref name="enable"/>.</post>
     public void EnableCriticalAlerts(bool enable)
     {
         enableCriticalAlerts = enable;
     }
 
+    /// <summary>
+    /// Enables or disables debug log output for the monitor.
+    /// </summary>
+    /// <param name="enable"><c>true</c> to emit debug logs; otherwise <c>false</c>.</param>
+    /// <pre>The monitor exists and may already be processing updates.</pre>
+    /// <post>Future debug messages honor the updated logging flag.</post>
     public void EnableDebugLogging(bool enable)
     {
         enableDebugLogging = enable;

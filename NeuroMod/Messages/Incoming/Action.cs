@@ -12,20 +12,57 @@ using System;
 namespace NeuroSdk.Messages.Incoming;
 
 [UsedImplicitly]
+/// <summary>
+/// Handles incoming action execution requests from the Neuro websocket protocol.
+/// </summary>
+/// <pre>Incoming messages contain an action id, a registered action name, and optional stringified JSON data.</pre>
+/// <post>Validated action requests are dispatched to the registered action implementation and their results are reported back to Neuro.</post>
 public sealed class Action : IncomingMessageHandler<Action.ParsedData>
 {
+    /// <summary>
+    /// Carries the parsed execution state for an incoming action request.
+    /// </summary>
+    /// <pre>The action request contained a non-empty action id and validation has begun or completed.</pre>
+    /// <post>The instance holds the action id plus the resolved action and parsed payload once validation succeeds.</post>
     public class ParsedData(string id)
     {
+        /// <summary>
+        /// Gets the protocol action id that must be echoed back in the result.
+        /// </summary>
         public readonly string Id = id;
+
+        /// <summary>
+        /// Gets or sets the resolved registered action implementation.
+        /// </summary>
         public INeuroAction? Action;
+
+        /// <summary>
+        /// Gets or sets the parsed payload produced during action validation.
+        /// </summary>
         public object? Data;
     }
 
+    /// <summary>
+    /// Determines whether this handler is responsible for the action command.
+    /// </summary>
+    /// <param name="command">The incoming command name.</param>
+    /// <returns><see langword="true"/> when the command is <c>action</c>.</returns>
+    /// <pre><paramref name="command"/> contains the incoming websocket command identifier.</pre>
+    /// <post>The result indicates whether this handler should process the message.</post>
     public override bool CanHandle(string command)
     {
         return command == "action";
     }
 
+    /// <summary>
+    /// Validates an incoming action request and resolves the registered action plus parsed payload.
+    /// </summary>
+    /// <param name="command">The incoming command name.</param>
+    /// <param name="messageData">The raw parsed payload wrapper.</param>
+    /// <param name="parsedData">Receives the parsed action execution state when validation succeeds.</param>
+    /// <returns>The validation result for the action request.</returns>
+    /// <pre><paramref name="messageData"/> contains the action id, name, and optional stringified payload expected by the Neuro action protocol.</pre>
+    /// <post>On success <paramref name="parsedData"/> contains the action id, resolved action, and parsed action payload.</post>
     protected override ExecutionResult Validate(string command, MessageJData messageData, out ParsedData? parsedData)
     {
         if (messageData.Data == null)
@@ -82,6 +119,13 @@ public sealed class Action : IncomingMessageHandler<Action.ParsedData>
         }
     }
 
+    /// <summary>
+    /// Sends the final action result back through the Neuro API client.
+    /// </summary>
+    /// <param name="parsedData">The parsed action execution state.</param>
+    /// <param name="result">The final execution result.</param>
+    /// <pre><paramref name="parsedData"/> contains the action id for the request being completed.</pre>
+    /// <post>An <c>action/result</c> message has been enqueued unless parsing failed so early that no id was available.</post>
     protected override void ReportResult(ParsedData? parsedData, ExecutionResult result)
     {
         if (parsedData == null)
@@ -90,11 +134,30 @@ public sealed class Action : IncomingMessageHandler<Action.ParsedData>
             return;
         }
 
-        WebsocketConnection.Instance!.Send(new ActionResult(parsedData.Id, result));
+        NeuroMod.Integration.Api.ApiClient.Send(new ActionResult(parsedData.Id, result));
     }
 
-    protected override UniTask ExecuteAsync(ParsedData? parsedData)
+    /// <summary>
+    /// Executes the resolved registered action using the parsed payload produced during validation.
+    /// Any unhandled exception is caught and reported back as a failed <c>action/result</c> so the
+    /// caller receives the exception details instead of a silent failure.
+    /// </summary>
+    /// <param name="parsedData">The parsed action execution state.</param>
+    /// <returns>A task representing the action execution.</returns>
+    /// <pre><paramref name="parsedData"/> contains a resolved action instance and the payload produced during validation.</pre>
+    /// <post>The returned task completes when the registered action has finished executing, or an error result has been sent on exception.</post>
+    protected override async UniTask ExecuteAsync(ParsedData? parsedData)
     {
-        return parsedData!.Action!.ExecuteAsync(parsedData.Data!);
+        try
+        {
+            await parsedData!.Action!.ExecuteAsync(parsedData.Data!);
+        }
+        catch (Exception e)
+        {
+            string message = $"Action '{parsedData!.Action?.Name ?? "unknown"}' threw {e.GetType().Name}: {e.Message}";
+            Debug.LogError($"[NeuroMod] {message}");
+            Debug.LogException(e);
+            ReportResult(parsedData, ExecutionResult.Failure(message));
+        }
     }
 }

@@ -11,17 +11,20 @@ namespace NeuroMod;
 /// Bridge class that connects ONI duplicate bio data systems with Neuro SDK
 /// Monitors bio data events and sends real-time context updates to the AI
 /// </summary>
+/// <pre>
+/// The bridge is attached to a live game object and the Neuro duplicate can be located in the current colony.
+/// </pre>
+/// <post>
+/// The bridge subscribes to duplicate health events, streams status context, and can raise emergency action windows.
+/// </post>
 public class NeuroIntegrationBridge : KMonoBehaviour
 {
     // Singleton instance
     public static NeuroIntegrationBridge? Instance { get; private set; }
 
-    // Configuration
-    [SerializeField]
-    private readonly bool enableBioDataStreaming = true;
-
-    [SerializeField]
-    private readonly float bioDataUpdateInterval = 5f; // Send updates every 5 seconds
+    // Configuration – values are read from ModConfig so they honour the mod options UI.
+    private bool enableBioDataStreaming;
+    private float bioDataUpdateInterval;
 
     [SerializeField]
     private readonly bool enableEmergencyActionWindows = true;
@@ -31,6 +34,12 @@ public class NeuroIntegrationBridge : KMonoBehaviour
 
     private bool isInitialized = false;
     private float lastBioDataUpdate = 0f;
+
+    /// <summary>
+    /// DI seam for API client use in the bridge. Tests can override this by subclassing
+    /// <see cref="NeuroIntegrationBridge"/> and providing a test implementation.
+    /// </summary>
+    protected virtual Integration.Api.IApiClient Api => Integration.Api.ApiClient.Instance;
 
     // Emergency tracking
     private bool isEmergencyActive = false;
@@ -42,6 +51,13 @@ public class NeuroIntegrationBridge : KMonoBehaviour
     {
         base.OnPrefabInit();
         Instance = this;
+
+        // Read bio settings from config so the mod options UI values are honoured.
+        DuplicantConfig? dup = ConfigManager.Instance?.Config?.Duplicant;
+        enableBioDataStreaming = dup?.BioMonitoringEnabled ?? true;
+        bioDataUpdateInterval  = dup != null ? dup.BioUpdateFrequency : 5f;
+
+        NeuroLogger.Log($"Bio streaming: {enableBioDataStreaming}, interval: {bioDataUpdateInterval}s", "NeuroIntegrationBridge");
     }
 
     protected override void OnSpawn()
@@ -111,17 +127,17 @@ public class NeuroIntegrationBridge : KMonoBehaviour
 
     private void SubscribeToBioDataEvents()
     {
-        if (DuplicateBioDataMonitor.Instance != null)
-        {
-            // Subscribe to critical events
-            DuplicateBioDataMonitor.Instance.OnCriticalHealthChange += OnHealthChange;
-            DuplicateBioDataMonitor.Instance.OnStarvationWarning += OnHungerChange;
-            DuplicateBioDataMonitor.Instance.OnStressWarning += OnStressChange;
-            DuplicateBioDataMonitor.Instance.OnSicknessDetected += OnSicknessDetected;
-            DuplicateBioDataMonitor.Instance.OnTemperatureWarning += OnTemperatureWarning;
+            if (DuplicateBioDataMonitor.Instance != null)
+            {
+                // Subscribe to critical events (wrapped for aggressive debug + anti-spam)
+                DuplicateBioDataMonitor.Instance.OnCriticalHealthChange += NeuroMod.Api.EventSubscriber.Wrap<MinionIdentity, DuplicateBioData>("NeuroIntegrationBridge.OnHealthChange", OnHealthChange);
+                DuplicateBioDataMonitor.Instance.OnStarvationWarning += NeuroMod.Api.EventSubscriber.Wrap<MinionIdentity, DuplicateBioData>("NeuroIntegrationBridge.OnHungerChange", OnHungerChange);
+                DuplicateBioDataMonitor.Instance.OnStressWarning += NeuroMod.Api.EventSubscriber.Wrap<MinionIdentity, DuplicateBioData>("NeuroIntegrationBridge.OnStressChange", OnStressChange);
+                DuplicateBioDataMonitor.Instance.OnSicknessDetected += NeuroMod.Api.EventSubscriber.Wrap<MinionIdentity, DuplicateBioData>("NeuroIntegrationBridge.OnSicknessDetected", OnSicknessDetected);
+                DuplicateBioDataMonitor.Instance.OnTemperatureWarning += NeuroMod.Api.EventSubscriber.Wrap<MinionIdentity, DuplicateBioData>("NeuroIntegrationBridge.OnTemperatureWarning", OnTemperatureWarning);
 
-            NeuroLogger.Log("Subscribed to bio data events", "NeuroIntegrationBridge");
-        }
+                NeuroLogger.Log("Subscribed to bio data events (wrapped)", "NeuroIntegrationBridge");
+            }
     }
 
     #region Event Handlers
@@ -145,12 +161,12 @@ public class NeuroIntegrationBridge : KMonoBehaviour
                 TriggerHealthEmergencyWindow(minion, bioData);
             }
 
-            Context.Send(message, true);
+            NeuroLogger.SendContext(message, true, "NeuroIntegrationBridge");
         }
         else if (bioData.HealthPercentage < 0.5f)
         {
             message += " - Low health, medical attention recommended.";
-            Context.Send(message, false);
+            NeuroLogger.SendContext(message, false, "NeuroIntegrationBridge");
         }
     }
 
@@ -173,12 +189,12 @@ public class NeuroIntegrationBridge : KMonoBehaviour
                 TriggerHungerEmergencyWindow(minion, bioData);
             }
 
-            Context.Send(message, true);
+            NeuroLogger.SendContext(message, true, "NeuroIntegrationBridge");
         }
         else if (bioData.CaloriePercentage < 0.5f)
         {
             message += " - Getting hungry, should eat soon.";
-            Context.Send(message, false);
+            NeuroLogger.SendContext(message, false, "NeuroIntegrationBridge");
         }
     }
 
@@ -201,12 +217,12 @@ public class NeuroIntegrationBridge : KMonoBehaviour
                 TriggerStressEmergencyWindow(minion, bioData);
             }
 
-            Context.Send(message, true);
+            Api.SendContext(message, true);
         }
         else if (bioData.StressPercentage > 0.6f)
         {
             message += " - High stress levels, recreation or rest recommended.";
-            Context.Send(message, false);
+            Api.SendContext(message, false);
         }
     }
 
@@ -223,7 +239,7 @@ public class NeuroIntegrationBridge : KMonoBehaviour
             $"Current conditions: {sicknesses}. Health is at {bioData.HealthPercentage:P1}. " +
             "Medical treatment is recommended.";
 
-        Context.Send(message, true);
+        NeuroLogger.SendContext(message, true, "NeuroIntegrationBridge");
     }
 
     private void OnTemperatureWarning(MinionIdentity minion, DuplicateBioData bioData)
@@ -236,10 +252,10 @@ public class NeuroIntegrationBridge : KMonoBehaviour
         // Enhanced message using bioData for more detailed temperature information
         string tempStatus = bioData.IsOverheating ? "overheating" : bioData.IsFreezing ? "freezing" : "temperature stress";
         string message = $"Temperature Warning: {minion.GetProperName()} is experiencing {tempStatus}. " +
-            $"Body temperature: {bioData.BodyTemperature:F1}�K. " +
+            $"Body temperature: {bioData.BodyTemperature:F1} K. " +
             $"Health at {bioData.HealthPercentage:P1}. Environmental conditions may be unsafe.";
 
-        Context.Send(message, true);
+        NeuroLogger.SendContext(message, true, "NeuroIntegrationBridge");
     }
 
     #endregion Event Handlers
@@ -369,6 +385,12 @@ public class NeuroIntegrationBridge : KMonoBehaviour
     /// <summary>
     /// Force refresh of the bridge when duplicate is renamed or changed
     /// </summary>
+    /// <pre>
+    /// Existing subscriptions and cached duplicate lookup may no longer match the intended target duplicant.
+    /// </pre>
+    /// <post>
+    /// Bridge initialization is rerun against the current colony state.
+    /// </post>
     public void RefreshBridge()
     {
         isInitialized = false;
@@ -377,9 +399,29 @@ public class NeuroIntegrationBridge : KMonoBehaviour
     }
 
     /// <summary>
+    /// Clears the active emergency guard once an emergency action has been handled.
+    /// </summary>
+    /// <pre>
+    /// An emergency window was previously opened by this bridge instance.
+    /// </pre>
+    /// <post>
+    /// The bridge may raise a future emergency window again after cooldown constraints are met.
+    /// </post>
+    internal void ClearEmergencyState()
+    {
+        isEmergencyActive = false;
+    }
+
+    /// <summary>
     /// Get the current Neuro duplicate
     /// </summary>
     /// <returns>The current Neuro minion, or null if not found</returns>
+    /// <pre>
+    /// Initialization may or may not have already identified the configured duplicant.
+    /// </pre>
+    /// <post>
+    /// The currently tracked Neuro duplicant reference is returned.
+    /// </post>
     public MinionIdentity? GetNeuroMinion()
     {
         return neuroMinion;
@@ -387,8 +429,13 @@ public class NeuroIntegrationBridge : KMonoBehaviour
 }
 
 /// <summary>
-/// Simple emergency action implementation for ActionWindow choices
+/// Simple emergency action implementation used by the bridge's ActionWindow.
+/// These actions are lightweight Neuro actions intended for immediate player
+/// responses to emergency prompts (health, hunger, stress).
 /// </summary>
+/// <param name="name">Internal action identifier.</param>
+/// <param name="title">Human-friendly title shown in the action window.</param>
+/// <param name="description">Detailed description displayed to the player.</param>
 public class EmergencyAction(string name, string title, string description) : NeuroAction
 {
     private readonly string actionName = name;
@@ -400,6 +447,7 @@ public class EmergencyAction(string name, string title, string description) : Ne
 
     protected override ExecutionResult Validate(ActionJData actionData)
     {
+        // Minimal validation: always succeeds for emergency actions
         return ExecutionResult.Success($"Emergency action '{actionName}' selected.");
     }
 
@@ -412,15 +460,13 @@ public class EmergencyAction(string name, string title, string description) : Ne
             // Reset emergency state when action is taken
             if (NeuroIntegrationBridge.Instance != null)
             {
-                NeuroIntegrationBridge bridge = NeuroIntegrationBridge.Instance;
-                System.Reflection.FieldInfo? isEmergencyActiveField = typeof(NeuroIntegrationBridge).GetField("isEmergencyActive",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                isEmergencyActiveField?.SetValue(bridge, false);
+                NeuroIntegrationBridge.Instance.ClearEmergencyState();
             }
         }
         catch (System.Exception ex)
         {
-            Debug.LogError($"[EmergencyAction] Error executing emergency action: {ex.Message}");
+            NeuroLogger.LogError($"[EmergencyAction] Error executing emergency action: {ex.Message}", "NeuroIntegrationBridge");
+            NeuroLogger.LogException(ex, "EmergencyAction.Execute", "NeuroIntegrationBridge");
             NeuroLogger.SendContext($"Error executing emergency action '{actionName}': {ex.Message}", false, "NeuroIntegrationBridge");
         }
 

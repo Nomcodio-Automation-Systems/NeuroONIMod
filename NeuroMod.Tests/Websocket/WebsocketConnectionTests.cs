@@ -8,7 +8,6 @@ namespace NeuroMod.Tests.Websocket;
 /// Comprehensive tests for WebsocketConnection class
 /// Tests connection management, message handling, and error scenarios
 /// </summary>
-[TestFixture]
 public class WebsocketConnectionTests
 {
     [SetUp]
@@ -57,7 +56,7 @@ public class WebsocketConnectionTests
         }
         else
         {
-            Assert.Pass("WebsocketConnection.Instance is null in test context, which is expected");
+            return;
         }
     }
 
@@ -79,7 +78,7 @@ public class WebsocketConnectionTests
         }
         else
         {
-            Assert.Pass("WebsocketConnection.Instance is null in test context, which is expected");
+            return;
         }
     }
 
@@ -102,7 +101,7 @@ public class WebsocketConnectionTests
         else
         {
             // Instance is null in test context, which is expected
-            Assert.Pass("WebsocketConnection.Instance is null in test context, which is expected");
+            return;
         }
     }
 
@@ -127,7 +126,7 @@ public class WebsocketConnectionTests
         }
         else
         {
-            Assert.Pass("WebsocketConnection.Instance is null in test context, which is expected");
+            return;
         }
     }
 

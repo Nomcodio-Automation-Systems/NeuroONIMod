@@ -32,6 +32,11 @@ A mod for Oxygen Not Included that allows [Neuro-sama](https://www.twitch.tv/ved
 - UniTask 2.5.10
 - System.Runtime.CompilerServices.Unsafe 6.1.2
 
+**Testing Dependencies:**
+- Node.js 16+ with npm
+- TypeScript (for Randy server)
+
+See `NeuroMod/NeurosControl.csproj` for full dependency list.
 
 ### Building the Mod
 
@@ -317,14 +322,14 @@ See `.github/copilot-instructions.md` for:
 
 ## 📜 License
 
-This project is licensed under the [MIT License](LICENSE).
+[Add your license here]
 
 ## 🙏 Credits
 
 - **Vedal987** - Neuro-sama creator
 - **Klei Entertainment** - Oxygen Not Included
 - **VedalAI** - NeuroSDK
-- **LinearBotSystems**
+
 ---
 
 **Note**: This mod is for entertainment and educational purposes. Use responsibly!

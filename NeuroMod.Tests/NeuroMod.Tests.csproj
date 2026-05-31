@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
@@ -6,16 +6,18 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
-    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
-    <!-- Suppress all conflict and dependency warnings including unused parameters -->
-    <NoWarn>CS1591;IDE0130;MSB3277;MSB4011;CS0111;CS0101;CS0579;CS8646;CS0462;CS0534;CS0535;CS0737;CS0121;CS0229;CS0246;CS0103;CS1061;CS0168;IDE0060</NoWarn>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>false</GenerateBindingRedirectsOutputType>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- Suppress conflict/dependency warnings and unused parameters -->
+    <NoWarn>CS1591;IDE0130;MSB3277;MSB4011;CS0579;CS8646;CS0462;CS0534;CS0535;CS0737;CS0229;CS0168;IDE0060</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="NUnit" Version="3.13.3" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="NUnit.ConsoleRunner" Version="3.14.0" />
     <PackageReference Include="Moq" Version="4.20.70" />
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
@@ -26,8 +28,10 @@
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
   </ItemGroup>
 
+    <!-- Removed explicit System.Runtime copy target when reverting to NUnit -->
+
   <ItemGroup>
-    <ProjectReference Include="..\NeuroMod\NeurosControl.csproj" />
+    <ProjectReference Include="..\NeuroMod\NeuroMod.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -35,6 +39,7 @@
       <HintPath>..\lib\0Harmony.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <!-- Explicit System.Runtime reference removed when reverting to NUnit -->
     <Reference Include="Assembly-CSharp">
       <HintPath>..\lib\Assembly-CSharp.dll</HintPath>
       <Private>true</Private>

@@ -7,7 +7,6 @@ namespace NeuroMod.Tests.Utilities;
 /// Tests for the Strings class
 /// Tests string constants and format strings used throughout the SDK
 /// </summary>
-[TestFixture]
 public class StringsTests
 {
     /// <summary>

@@ -2,6 +2,11 @@
 
 namespace NeuroSdk.Json;
 
+/// <summary>
+/// Defines the JSON value kinds that can be expressed by the SDK schema helpers.
+/// </summary>
+/// <pre>Values are used as schema type flags when constructing <see cref="JsonSchema"/> fragments.</pre>
+/// <post>Consumers can combine these flags to describe the permitted JSON kinds for a schema node.</post>
 public enum JsonSchemaType
 {
     /// <summary>

@@ -5,13 +5,18 @@ using UnityEngine;
 namespace NeuroMod;
 
 /// <summary>
-/// Utility class for analyzing and managing duplicate bio data
+/// Provides aggregate analysis utilities over the current duplicate bio data snapshot.
 /// </summary>
+/// <pre>The patch cache can resolve bio data for the live duplicates currently in the colony.</pre>
+/// <post>All analysis methods operate on a point-in-time snapshot and do not mutate live game state.</post>
 public static class BioDataAnalyzer
 {
     /// <summary>
-    /// Analyze colony health trends over time
+    /// Aggregates the current colony-wide health statistics.
     /// </summary>
+    /// <returns>A snapshot of the colony health metrics derived from the currently tracked duplicates.</returns>
+    /// <pre>The bio-data patch layer has been initialized.</pre>
+    /// <post>The returned statistics object always contains non-null counters and normalized averages.</post>
     public static ColonyHealthStats AnalyzeColonyHealth()
     {
         Dictionary<MinionIdentity, DuplicateBioData> allBioData = DuplicateBioDataPatches.GetAllBioData();
@@ -113,8 +118,11 @@ public static class BioDataAnalyzer
     }
 
     /// <summary>
-    /// Find duplicates that need immediate attention
+    /// Builds the set of immediate alerts that should be surfaced to callers.
     /// </summary>
+    /// <returns>A severity-sorted list of alerts for the current colony snapshot.</returns>
+    /// <pre>The current bio data snapshot can be enumerated without mutating game state.</pre>
+    /// <post>The returned list is ordered from highest severity to lowest severity.</post>
     public static List<DuplicateAlert> GetImmediateAlerts()
     {
         List<DuplicateAlert> alerts = [];
@@ -196,8 +204,11 @@ public static class BioDataAnalyzer
     }
 
     /// <summary>
-    /// Get duplicates ranked by overall health score
+    /// Ranks duplicates from least healthy to most healthy according to the analyzer score.
     /// </summary>
+    /// <returns>The duplicate rankings ordered by ascending health score.</returns>
+    /// <pre>The analyzer score weights are accepted as the current colony-health heuristic.</pre>
+    /// <post>The first returned entry represents the weakest overall health score in the current snapshot.</post>
     public static List<DuplicateHealthRanking> RankDuplicatesByHealth()
     {
         List<DuplicateHealthRanking> rankings = [];
@@ -228,6 +239,10 @@ public static class BioDataAnalyzer
     /// <summary>
     /// Calculate overall health score (lower is worse)
     /// </summary>
+    /// <param name="bioData">The duplicate bio-data snapshot to score.</param>
+    /// <returns>A normalized health score between 0 and 1.</returns>
+    /// <pre><paramref name="bioData"/> contains the health-related values to aggregate into a score.</pre>
+    /// <post>A clamped score describing the duplicate's overall condition is returned.</post>
     private static float CalculateOverallHealthScore(DuplicateBioData bioData)
     {
         float score = 0f;
@@ -266,6 +281,10 @@ public static class BioDataAnalyzer
     /// <summary>
     /// Get list of health issues for a duplicate
     /// </summary>
+    /// <param name="bioData">The duplicate bio-data snapshot to inspect.</param>
+    /// <returns>A list of human-readable health issues currently affecting the duplicate.</returns>
+    /// <pre><paramref name="bioData"/> contains the condition flags used to build the issue list.</pre>
+    /// <post>The returned list contains one entry per detected issue and may be empty when no issues are present.</post>
     private static List<string> GetHealthIssues(DuplicateBioData bioData)
     {
         List<string> issues = [];
@@ -319,8 +338,11 @@ public static class BioDataAnalyzer
     }
 
     /// <summary>
-    /// Recommend actions for colony health improvement
+    /// Produces human-readable recommendations based on the current colony health snapshot.
     /// </summary>
+    /// <returns>A non-empty list of recommendations or a single healthy-status message.</returns>
+    /// <pre>The colony statistics are computed from the current live snapshot.</pre>
+    /// <post>The returned list contains at least one recommendation string.</post>
     public static List<string> GetHealthRecommendations()
     {
         List<string> recommendations = [];
@@ -410,6 +432,11 @@ public class ColonyHealthStats
     public int OverheatingCount { get; set; }
     public int FreezingCount { get; set; }
 
+    /// <summary>
+    /// Formats the aggregate health statistics for diagnostic output.
+    /// </summary>
+    /// <pre>The statistics instance has already been populated by the analyzer.</pre>
+    /// <post>The returned string contains the total duplicate count and the most relevant health counters.</post>
     public override string ToString()
     {
         return $"Colony Health: {TotalDuplicates} duplicates, " +
@@ -428,6 +455,11 @@ public class DuplicateAlert
     public string Message { get; set; } = string.Empty;
     public float Value { get; set; }
 
+    /// <summary>
+    /// Formats the alert for logs and diagnostics.
+    /// </summary>
+    /// <pre><see cref="Minion"/> and <see cref="Message"/> have been populated by the analyzer.</pre>
+    /// <post>The returned string always includes the severity, duplicate name, and alert message.</post>
     public override string ToString()
     {
         return $"[{Severity}] {Minion.GetProperName()}: {Message}";
@@ -444,6 +476,11 @@ public class DuplicateHealthRanking
     public float StressPercentage { get; set; }
     public List<string> Issues { get; set; } = [];
 
+    /// <summary>
+    /// Formats the health ranking entry for logs and diagnostics.
+    /// </summary>
+    /// <pre><see cref="Minion"/> and the score fields have been populated by the analyzer.</pre>
+    /// <post>The returned string contains the duplicate name, score, and collected issue labels.</post>
     public override string ToString()
     {
         return $"{Minion.GetProperName()}: Score {HealthScore:F2} " +

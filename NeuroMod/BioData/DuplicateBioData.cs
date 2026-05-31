@@ -4,8 +4,10 @@ using System.Collections.Generic;
 namespace NeuroMod;
 
 /// <summary>
-/// Container class for all duplicate bio data
+/// Provides a snapshot-style view over the tracked duplicate bio data.
 /// </summary>
+/// <pre><paramref name="minion"/> references the live duplicate that owns the queried components.</pre>
+/// <post>Public properties return a safe default when the underlying game component is unavailable.</post>
 public class DuplicateBioData(MinionIdentity minion)
 {
     private readonly MinionIdentity minionIdentity = minion;
@@ -14,6 +16,22 @@ public class DuplicateBioData(MinionIdentity minion)
     private Health? Health => minionIdentity?.GetComponent<Health>();
 
     private Effects? Effects => minionIdentity?.GetComponent<Effects>();
+
+    private float GetAmountPercentage(AmountInstance? amount)
+    {
+        if (amount is null)
+        {
+            return 0f;
+        }
+
+        float maxValue = amount.GetMax();
+        return maxValue > 0f ? amount.value / maxValue : 0f;
+    }
+
+    private AmountInstance? LookupAmount(Amount amount)
+    {
+        return minionIdentity?.gameObject is not null ? amount.Lookup(minionIdentity.gameObject) : null;
+    }
 
     #region Health Data
 
@@ -33,13 +51,7 @@ public class DuplicateBioData(MinionIdentity minion)
     {
         get
         {
-            if (minionIdentity?.gameObject == null)
-            {
-                return 0f;
-            }
-
-            AmountInstance calories = Db.Get().Amounts.Calories.Lookup(minionIdentity.gameObject);
-            return calories != null ? (calories.value / calories.GetMax()) : 0f;
+            return GetAmountPercentage(LookupAmount(Db.Get().Amounts.Calories));
         }
     }
 
@@ -47,12 +59,7 @@ public class DuplicateBioData(MinionIdentity minion)
     {
         get
         {
-            if (minionIdentity?.gameObject == null)
-            {
-                return 0f;
-            }
-
-            AmountInstance calories = Db.Get().Amounts.Calories.Lookup(minionIdentity.gameObject);
+            AmountInstance? calories = LookupAmount(Db.Get().Amounts.Calories);
             return calories?.value ?? 0f;
         }
     }
@@ -61,12 +68,7 @@ public class DuplicateBioData(MinionIdentity minion)
     {
         get
         {
-            if (minionIdentity?.gameObject == null)
-            {
-                return 0f;
-            }
-
-            AmountInstance calories = Db.Get().Amounts.Calories.Lookup(minionIdentity.gameObject);
+            AmountInstance? calories = LookupAmount(Db.Get().Amounts.Calories);
             return calories?.GetMax() ?? 0f;
         }
     }
@@ -82,13 +84,7 @@ public class DuplicateBioData(MinionIdentity minion)
     {
         get
         {
-            if (minionIdentity?.gameObject == null)
-            {
-                return 0f;
-            }
-
-            AmountInstance stamina = Db.Get().Amounts.Stamina.Lookup(minionIdentity.gameObject);
-            return stamina != null ? (stamina.value / stamina.GetMax()) : 0f;
+            return GetAmountPercentage(LookupAmount(Db.Get().Amounts.Stamina));
         }
     }
 
@@ -96,12 +92,7 @@ public class DuplicateBioData(MinionIdentity minion)
     {
         get
         {
-            if (minionIdentity?.gameObject == null)
-            {
-                return 0f;
-            }
-
-            AmountInstance stamina = Db.Get().Amounts.Stamina.Lookup(minionIdentity.gameObject);
+            AmountInstance? stamina = LookupAmount(Db.Get().Amounts.Stamina);
             return stamina?.value ?? 0f;
         }
     }
@@ -117,13 +108,7 @@ public class DuplicateBioData(MinionIdentity minion)
     {
         get
         {
-            if (minionIdentity?.gameObject == null)
-            {
-                return 0f;
-            }
-
-            AmountInstance bladder = Db.Get().Amounts.Bladder.Lookup(minionIdentity.gameObject);
-            return bladder != null ? (bladder.value / bladder.GetMax()) : 0f;
+            return GetAmountPercentage(LookupAmount(Db.Get().Amounts.Bladder));
         }
     }
 
@@ -137,13 +122,7 @@ public class DuplicateBioData(MinionIdentity minion)
     {
         get
         {
-            if (minionIdentity?.gameObject == null)
-            {
-                return 0f;
-            }
-
-            AmountInstance stress = Db.Get().Amounts.Stress.Lookup(minionIdentity.gameObject);
-            return stress != null ? (stress.value / stress.GetMax()) : 0f;
+            return GetAmountPercentage(LookupAmount(Db.Get().Amounts.Stress));
         }
     }
 
@@ -180,7 +159,10 @@ public class DuplicateBioData(MinionIdentity minion)
                 {
                     foreach (SicknessInstance? sickness in sicknessInstances)
                     {
-                        sicknesses.Add(sickness.modifier.Name);
+                        if (sickness is not null)
+                        {
+                            sicknesses.Add(sickness.modifier.Name);
+                        }
                     }
                 }
             }
@@ -227,13 +209,7 @@ public class DuplicateBioData(MinionIdentity minion)
     {
         get
         {
-            if (minionIdentity?.gameObject == null)
-            {
-                return 0f;
-            }
-
-            AmountInstance breath = Db.Get().Amounts.Breath.Lookup(minionIdentity.gameObject);
-            return breath != null ? (breath.value / breath.GetMax()) : 0f;
+            return GetAmountPercentage(LookupAmount(Db.Get().Amounts.Breath));
         }
     }
 
@@ -247,23 +223,23 @@ public class DuplicateBioData(MinionIdentity minion)
     {
         get
         {
-            if (minionIdentity?.gameObject == null)
-            {
-                return 0f;
-            }
-
-            AmountInstance temperature = Db.Get().Amounts.Temperature.Lookup(minionIdentity.gameObject);
+            AmountInstance? temperature = LookupAmount(Db.Get().Amounts.Temperature);
             return temperature?.value ?? 0f;
         }
     }
 
-    public bool IsOverheating => BodyTemperature > 310f; // > 37�C
-    public bool IsFreezing => BodyTemperature < 290f; // < 17�C
+    public bool IsOverheating => BodyTemperature > 310f; // Approximately above 37C
+    public bool IsFreezing => BodyTemperature < 290f; // Approximately below 17C
 
     #endregion Temperature Data
 
     #region Update Methods
 
+    /// <summary>
+    /// Forces the current snapshot to touch each tracked metric once.
+    /// </summary>
+    /// <pre>The instance is associated with a duplicate that may or may not be fully initialized.</pre>
+    /// <post>No exception is thrown for missing game components; unavailable values remain at their safe defaults.</post>
     public void UpdateAllData()
     {
         // Force refresh all cached values by accessing properties
@@ -284,11 +260,21 @@ public class DuplicateBioData(MinionIdentity minion)
 
     #region Summary Methods
 
+    /// <summary>
+    /// Builds a short health-focused summary for the duplicate.
+    /// </summary>
+    /// <pre>The snapshot may contain fallback values when health is not yet initialized.</pre>
+    /// <post>The returned string always contains the current health percentage and health state.</post>
     public string GetHealthSummary()
     {
         return $"Health: {HealthPercentage:P1} ({HealthState})";
     }
 
+    /// <summary>
+    /// Builds a compact list of unmet needs inferred from the tracked bio data.
+    /// </summary>
+    /// <pre>The snapshot values have already been normalized into percentages or safe defaults.</pre>
+    /// <post>Returns <c>All Good</c> only when no monitored need currently crosses its warning threshold.</post>
     public string GetNeedsSummary()
     {
         List<string> needs = [];
@@ -336,6 +322,11 @@ public class DuplicateBioData(MinionIdentity minion)
         return needs.Count > 0 ? string.Join(", ", needs) : "All Good";
     }
 
+    /// <summary>
+    /// Formats the duplicate name together with the current health and need summaries.
+    /// </summary>
+    /// <pre>The owning duplicate identity is still available to provide a display name.</pre>
+    /// <post>The returned string is suitable for logs and diagnostic output.</post>
     public override string ToString()
     {
         return $"{minionIdentity.GetProperName()}: {GetHealthSummary()} | Needs: {GetNeedsSummary()}";
